@@ -1,0 +1,42 @@
+# 前端
+node_modules/
+dist/
+dist-ssr/
+*.local
+.DS_Store
+*.log
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# 编辑器
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 后端 Go
+bin/
+target/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+go.work
+go.work.sum
+
+# 环境与配置
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+config.yaml
+config.dev.yaml
+
+# 系统文件
+Thumbs.db
