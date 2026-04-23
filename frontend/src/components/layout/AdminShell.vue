@@ -1,0 +1,97 @@
+<script setup lang="ts">
+import { ref } from 'vue'
+
+import AdminSidebar from './AdminSidebar.vue'
+import AdminTopbar from './AdminTopbar.vue'
+import type { SidebarMenuGroup } from './layout.types'
+
+// 这个组件是后台页面最外层的“骨架”：
+// 左边是侧边栏，右边是顶部栏和内容区。
+// 具体内容不写死在这里，而是通过 slot 由外部传进来。
+const props = defineProps<{
+  activeMenu: string
+  menuGroups: SidebarMenuGroup[]
+  pageDescription: string
+  pageTitle: string
+}>()
+
+// 当侧边栏菜单变化时，通知父组件更新激活菜单。
+const emit = defineEmits<{
+  (event: 'update:activeMenu', value: string): void
+}>()
+
+// 控制移动端抽屉菜单是否打开。
+// ref(...) 可以理解成“会跟着界面一起更新的变量”。
+const mobileSidebarVisible = ref(false)
+
+// 点击菜单时：
+// 1. 把新菜单值往上抛给父组件
+// 2. 如果当前是移动端抽屉，同时把抽屉关掉
+const handleMenuChange = (menuKey: string) => {
+  emit('update:activeMenu', menuKey)
+  mobileSidebarVisible.value = false
+}
+
+// 只在移动端时需要主动打开侧边栏。
+const openSidebar = () => {
+  mobileSidebarVisible.value = true
+}
+</script>
+
+<template>
+  <div class="min-h-screen text-slate-900">
+    <div class="mx-auto flex min-h-screen max-w-[1800px] gap-6 p-4 sm:p-6">
+      <!-- 大屏下保持固定侧边导航，后台常用入口不需要折叠到内容流里 -->
+      <AdminSidebar
+        class="hidden h-[calc(100vh-3rem)] shrink-0 lg:flex"
+        :active-menu="props.activeMenu"
+        :menu-groups="props.menuGroups"
+        @update:active-menu="handleMenuChange"
+      />
+
+      <!--
+        el-drawer 是 Element Plus 的抽屉组件。
+        小屏幕时把侧边栏放进抽屉里，避免内容区被挤得太窄。
+      -->
+      <el-drawer v-model="mobileSidebarVisible" :with-header="false" direction="ltr" size="300px">
+        <!-- 移动端沿用同一份侧边栏组件，避免未来维护两套导航结构 -->
+        <AdminSidebar
+          class="h-full rounded-none"
+          :active-menu="props.activeMenu"
+          :menu-groups="props.menuGroups"
+          @update:active-menu="handleMenuChange"
+        />
+      </el-drawer>
+
+      <main class="flex min-w-0 flex-1 flex-col gap-6">
+        <!-- 顶部栏负责标题、说明和右侧操作区 -->
+        <AdminTopbar
+          :page-description="props.pageDescription"
+          :page-title="props.pageTitle"
+          @toggle-sidebar="openSidebar"
+        >
+          <template #actions>
+            <slot name="header-actions" />
+          </template>
+        </AdminTopbar>
+
+        <!-- 业务主内容区：后续可替换成真实图表、表格、表单或子页面容器 -->
+        <section class="flex-1">
+          <!-- 这里的 slot 就是“内容插槽”，具体显示什么由外层页面决定 -->
+          <slot />
+        </section>
+      </main>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+/* 去掉抽屉默认背景和默认内边距，让里面的侧边栏能完整铺满。 */
+:deep(.el-drawer) {
+  background: transparent;
+}
+
+:deep(.el-drawer__body) {
+  padding: 0;
+}
+</style>
