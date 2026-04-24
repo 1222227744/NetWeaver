@@ -1,0 +1,62 @@
+/* 引入 Tailwind 的三层基础能力：
+   1. base：基础重置样式
+   2. components：组件类
+   3. utilities：工具类，例如 p-4、flex、text-sm */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* 这里放全局的基础视觉设置，整个页面都会继承。 */
+  color: #0f172a;
+  background-color: #f4f7fb;
+  font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  /* 让 padding 和 border 计算进元素宽高，布局更稳定。 */
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  /* 让页面至少和屏幕一样高，后台布局更容易撑满整屏。 */
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  /* 页面大背景：两层浅色光晕 + 底色。
+     这样后台页面不会是一整块死白，看起来会更柔和。 */
+  background:
+    radial-gradient(circle at top left, rgba(37, 141, 125, 0.16), transparent 28%),
+    radial-gradient(circle at top right, rgba(14, 116, 144, 0.12), transparent 24%),
+    #f4f7fb;
+}
+
+button,
+input,
+textarea,
+select {
+  /* 表单元素默认也继承全局字体，避免浏览器各自的默认样式不统一。 */
+  font: inherit;
+}
+
+@layer components {
+  /* 常用卡片外观：圆角、边框、半透明白底、阴影。
+     以后页面里想做一个“面板/卡片”，直接复用这个类即可。 */
+  .panel-surface {
+    @apply rounded-[1.75rem] border border-slate-200/70 bg-white/85 shadow-panel backdrop-blur;
+  }
+
+  /* 常用的小标题外观：字母间距大、颜色浅、适合做模块标题。 */
+  .panel-heading {
+    @apply text-xs font-semibold uppercase tracking-[0.28em] text-slate-400;
+  }
+}

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NetWeaver Admin</title>
+  </head>
+  <body>
+    <!--
+      这里先只放一个空的根节点。
+      Vue 启动后，会把整个后台页面“挂载”到这个 div 里面。
+      你可以把它理解成：先留一块空白画布，后面交给 Vue 往里渲染页面。
+    -->
+    <div id="app"></div>
+
+    <!--
+      浏览器会从这里开始加载前端入口文件。
+      src/main.ts 会继续把 App.vue、样式、Element Plus 等内容都串起来。
+    -->
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
