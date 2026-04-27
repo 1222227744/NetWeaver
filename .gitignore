@@ -1,43 +1,65 @@
-# 前端
-node_modules/
-dist/
-dist-ssr/
-*.local
-.DS_Store
-*.log
-vite.config.js.timestamp-*
-vite.config.ts.timestamp-*
-.npm-cache/
+# 维护约定
+# 1. 前端同学只在 `frontend` 分区追加或调整规则
+# 2. 后端同学只在 `backend` 分区追加或调整规则
+# 3. 文档同学只在 `docs` 分区追加或调整规则
+# 4. 编辑器和系统文件放在全局分区，避免和业务目录规则混在一起
 
-# 编辑器
+# 全局：编辑器与系统文件
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
-
-# 后端 Go
-bin/
-target/
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-*.test
-*.out
-vendor/
-go.work
-go.work.sum
-
-# 环境与配置
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-config.yaml
-config.dev.yaml
-
-# 系统文件
+.DS_Store
 Thumbs.db
+
+# 根目录：本地环境与临时文件
+/.env
+/.env.local
+/*.log
+
+# frontend：前端本地产物与缓存
+/frontend/node_modules/
+/frontend/dist/
+/frontend/verify-dist/
+/frontend/dist-ssr/
+/frontend/.npm-cache/
+/frontend/*.local
+/frontend/*.log
+/frontend/vite.config.js.timestamp-*
+/frontend/vite.config.ts.timestamp-*
+/frontend/.env
+/frontend/.env.local
+/frontend/.env.development.local
+/frontend/.env.test.local
+/frontend/.env.production.local
+
+# backend：后端编译产物、本地依赖与本地配置
+/backend/bin/
+/backend/target/
+/backend/vendor/
+/backend/*.exe
+/backend/*.exe~
+/backend/*.dll
+/backend/*.so
+/backend/*.dylib
+/backend/*.test
+/backend/*.out
+/backend/go.work
+/backend/go.work.sum
+/backend/*.log
+/backend/.env
+/backend/.env.local
+/backend/.env.development.local
+/backend/.env.test.local
+/backend/.env.production.local
+/backend/config.yaml
+/backend/config.dev.yaml
+
+# docs：文档协作时常见的临时文件与本地工具缓存
+/docs/*.tmp
+/docs/*.bak
+/docs/~$*
+/docs/.obsidian/workspace.json
+/docs/.vitepress/cache/
+
