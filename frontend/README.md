@@ -69,7 +69,7 @@ frontend/
 - 依照 API 文档的 `GET /api/v1/dashboard/nodes`
 - 写死一段 mock JSON
 - 在页面的 `Element Plus Table` 中渲染在线节点列表
-- 在代码里补充必要注释，明确 `ref`、`reactive` 和请求层的数据流
+- 在代码里补充必要注释，明确 `ref`、`reactive`、axios 请求层和数据流
 
 参考文档：
 
@@ -81,7 +81,8 @@ frontend/
   - 按接口文档定义 `ApiResponse<T>`、`DashboardNode`、`DashboardNodesData`
   - 写入本地 mock JSON，字段与接口文档保持一致
   - 提供 `getDashboardNodes()` 方法
-  - 维持 `response.data` 读取结构，和后续真实请求层的返回习惯保持一致
+  - 使用 axios 请求层，并通过自定义 adapter 返回 mock 数据
+  - 维持 `response.data` 读取结构，和真实请求层的返回习惯保持一致
 - 新建 [src/components/dashboard/OnlineNodeTable.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/OnlineNodeTable.vue)
   - 使用 `ref<DashboardNode[]>` 保存表格数据
   - 使用 `reactive(...)` 保存页面状态：`loading`、统计数字、刷新时间
@@ -110,12 +111,11 @@ frontend/
   - `connected_peers`
 - 页面会在请求层返回后只显示 `status === "online"` 的节点
 
-关于请求层的实际实现：
+关于请求层的当前实现：
 
-- 本次原计划引入 `axios`
-- 当前环境的 npm 缓存目录存在系统级写入限制，安装新依赖失败
-- 因此当前请求层采用了本地 `mockGet()` 函数模拟请求
-- 页面侧仍保留 `response.data` 结构读取方式，方便后续切换成真实 HTTP 请求
+- 当前请求层已经使用 `axios`
+- 当前仍然返回 mock 数据，但 mock 数据是通过 axios 自定义 adapter 返回
+- 页面侧按标准 axios 返回结构读取 `response.data`
 
 验证结果：
 
@@ -144,6 +144,19 @@ cd d:\Documents\WorkSpace\30-Playground\frontend\planA\NetWeaver\frontend
 npm run dev
 ```
 
+首次安装或补装依赖：
+
+```powershell
+npm install
+```
+
+如果后续新增某个前端依赖，例如：
+
+```powershell
+npm install axios
+npm install echarts
+```
+
 类型检查：
 
 ```powershell
@@ -156,8 +169,113 @@ npx vue-tsc --noEmit
 npx vite build --configLoader native --outDir verify-dist
 ```
 
+## 以后遇到 npm 权限问题时的处理流程
+
+目标：
+
+- 保持源码仍然采用标准 npm 依赖方式
+- 不把 CDN 脚本或长期本地绕过方案留在业务代码里
+
+处理顺序：
+
+1. 先确认缺少的是哪个 npm 包
+2. 在 `frontend/` 目录执行对应安装命令
+3. 安装完成后检查这三处是否同步更新：
+   - [package.json](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/package.json)
+   - [package-lock.json](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/package-lock.json)
+   - `frontend/node_modules/`
+4. 如果某次为了临时验证使用了本地脚本或全局变量方式，安装成功后要立刻删掉临时方案，恢复为 npm 导入
+5. 再执行类型检查和打包验证
+
+本项目当前已通过 npm 管理的新增依赖：
+
+- `axios`
+- `echarts`
+
 ## 维护约定
 
 - 以后前端每完成一轮可识别功能，就在这个文件继续追加一节开发记录
 - 每一节至少记录：日期、目标、修改文件、页面结果、验证结果
 - 如果开发过程受环境限制影响，也直接记录为事实，避免后续重复排查
+
+### 2026-05-01 第三次开发：npm 依赖收口与临时目录清理
+
+目标：
+
+- 将前端依赖彻底收口到 npm 管理方式
+- 清理历史排障和临时验证过程中产生的无用目录
+- 明确以后标准的运行、构建、验证和清理流程
+
+本次确认的无用历史目录：
+
+- `frontend/cache-test-dir`
+- `frontend/writable-cache`
+- `frontend/public/vendor`
+- `frontend/verify-dist`
+- `frontend/verify-dist-graph`
+- `frontend/verify-dist-graph-2`
+- `frontend/verify-dist-npm`
+
+这些目录的来源说明：
+
+- `cache-test-dir`
+  仅用于测试当前工作区是否允许创建目录。
+- `writable-cache`
+  仅用于测试 npm 缓存能否改到其他本地路径。
+- `public/vendor`
+  曾尝试放本地脚本资源，后来已经改回 npm 依赖导入方式。
+- `verify-dist*`
+  都是某次 `vite build --outDir ...` 产生的临时验证产物目录，不属于源码，也不属于标准部署目录。
+
+本次处理结果：
+
+- 前端源码已完全恢复为标准 npm 依赖方式：
+  - `axios`
+  - `echarts`
+- `.gitignore` 中已经移除了 `verify-dist`、`verify-dist-graph`、`verify-dist-graph-2` 这些一次性目录规则
+- 这些历史目录应在验证完成后直接删除，不应继续保留，也不应继续写进忽略规则
+
+执行环境事实记录：
+
+- 当前会话下，删除上述目录的命令被本地执行策略拦截，未能由自动化命令直接完成
+- 这不影响源码本身的运行逻辑，但会影响工作区整洁度
+
+以后前端的标准验证流程：
+
+1. 安装依赖
+
+```powershell
+cd d:\Documents\WorkSpace\30-Playground\frontend\planA\NetWeaver\frontend
+npm install
+```
+
+2. 启动开发环境
+
+```powershell
+npm run dev
+```
+
+3. 类型检查
+
+```powershell
+npx vue-tsc --noEmit
+```
+
+4. 标准生产构建
+
+```powershell
+npm run build
+```
+
+5. 本地预览打包结果
+
+```powershell
+npm run preview
+```
+
+标准目录使用规则：
+
+- 日常开发只修改 `src/`、`index.html`、配置文件和 `README.md`
+- 正式构建结果只认 `frontend/dist`
+- 若为了排障临时使用了自定义 `--outDir`，验证完成后必须立即删除对应目录
+- 不再保留 `verify-dist*`、测试缓存目录或其他一次性目录
