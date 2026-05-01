@@ -1,3 +1,6 @@
+import axios from 'axios'
+import type { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
+
 // 全局响应结构按照 API 文档统一定义。
 // 这样后面无论接真实后端还是继续扩展其他接口，返回值结构都能保持一致。
 export interface ApiResponse<T> {
@@ -21,10 +24,47 @@ export interface DashboardNodesData {
   nodes: DashboardNode[]
 }
 
-// 这里保留一个最小响应结构，读取方式和 axios 常见的 response.data 一致。
-// 当前分支先用它承接 mock 请求，等仓库允许安装依赖后可平滑替换成真实 axios。
-interface MockHttpResponse<T> {
-  data: T
+export interface GraphNodeItem {
+  id: string
+  name: string
+  x: number
+  y: number
+  symbolSize: number
+  value: number
+  hostname: string
+  virtualIp: string
+  publicIp: string
+  natType: string
+  itemStyle: {
+    color: string
+  }
+  label: {
+    show: boolean
+    color: string
+    fontWeight: number
+  }
+}
+
+export interface GraphLinkItem {
+  source: string
+  target: string
+  relationText: 'P2P' | 'Relay'
+  lineStyle: {
+    color: string
+    width: number
+    curveness: number
+  }
+  label: {
+    show: boolean
+    formatter: string
+    color: string
+    fontWeight: number
+  }
+}
+
+export interface DashboardGraphData {
+  nodes: GraphNodeItem[]
+  links: GraphLinkItem[]
 }
 
 // 当前分支先没有真实后端，所以把接口文档里的数据格式直接写成 mock JSON。
@@ -74,26 +114,91 @@ const mockDashboardNodesResponse: ApiResponse<DashboardNodesData> = {
   }
 }
 
-const mockGet = async <T>(url: string, mockData: T): Promise<MockHttpResponse<T>> => {
-  // 这里保留一个短暂延迟，用来模拟真实请求返回的过程。
-  // 页面上的 loading 状态也会因此真实触发。
-  // url 参数保留下来，是为了让调用处继续维持真实接口的写法。
-  void url
+const dashboardNodesMockAdapter: AxiosAdapter = async (
+  config: InternalAxiosRequestConfig
+): Promise<AxiosResponse<ApiResponse<DashboardNodesData>>> => {
+  // 当前还没有接真实后端，所以依旧通过 mock 数据返回。
+  // 但请求层已经切回 axios 标准写法，后续替换真实接口时不需要动页面组件。
   await new Promise((resolve) => setTimeout(resolve, 300))
 
   return {
-    data: mockData
+    data: mockDashboardNodesResponse,
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    config
   }
 }
 
 export const getDashboardNodes = async (): Promise<ApiResponse<DashboardNodesData>> => {
   // 这里保留真实接口的 URL，和 API 文档保持一致：
   // GET /api/v1/dashboard/nodes
-  // 当前先用本地 mock 请求返回数据，但页面读取方式依旧保持 response.data 结构。
-  const response = await mockGet<ApiResponse<DashboardNodesData>>(
-    '/api/v1/dashboard/nodes',
-    mockDashboardNodesResponse
-  )
+  // 当前虽然返回的是 mock 数据，但调用方式已经恢复为 axios.get(...).data。
+  const response = await axios.get<ApiResponse<DashboardNodesData>>('/api/v1/dashboard/nodes', {
+    adapter: dashboardNodesMockAdapter
+  })
 
   return response.data
+}
+
+const getRelationText = (sourceNode: DashboardNode, targetNode: DashboardNode): 'P2P' | 'Relay' => {
+  // 这里先按 NAT 类型做一条简单规则：
+  // 只要两端有任意一端是 Symmetric，就先视为更依赖中转链路，标记为 Relay。
+  // 其他情况先标记为 P2P。
+  const natTypes = [sourceNode.nat_type, targetNode.nat_type]
+  return natTypes.includes('Symmetric') ? 'Relay' : 'P2P'
+}
+
+export const buildDashboardGraphData = (onlineNodes: DashboardNode[]): DashboardGraphData => {
+  // 当前需求是先渲染一个“两节点单连线”的关系图，
+  // 所以这里只取前两个在线节点做最小图结构。
+  const graphNodesSource = onlineNodes.slice(0, 2)
+
+  const nodes: GraphNodeItem[] = graphNodesSource.map((node, index) => ({
+    id: node.node_id,
+    name: node.hostname,
+    x: index === 0 ? 180 : 520,
+    y: 170,
+    symbolSize: 74,
+    value: node.connected_peers,
+    hostname: node.hostname,
+    virtualIp: node.virtual_ip,
+    publicIp: node.public_ip,
+    natType: node.nat_type,
+    itemStyle: {
+      color: index === 0 ? '#258d7d' : '#0ea5e9'
+    },
+    label: {
+      show: true,
+      color: '#0f172a',
+      fontWeight: 600
+    }
+  }))
+
+  const links: GraphLinkItem[] =
+    graphNodesSource.length >= 2
+      ? [
+          {
+            source: graphNodesSource[0].node_id,
+            target: graphNodesSource[1].node_id,
+            relationText: getRelationText(graphNodesSource[0], graphNodesSource[1]),
+            lineStyle: {
+              color: '#64748b',
+              width: 3,
+              curveness: 0.06
+            },
+            label: {
+              show: true,
+              formatter: getRelationText(graphNodesSource[0], graphNodesSource[1]),
+              color: '#1e293b',
+              fontWeight: 700
+            }
+          }
+        ]
+      : []
+
+  return {
+    nodes,
+    links
+  }
 }

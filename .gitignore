@@ -21,7 +21,6 @@ Thumbs.db
 # frontend：前端本地产物与缓存
 /frontend/node_modules/
 /frontend/dist/
-/frontend/verify-dist/
 /frontend/dist-ssr/
 /frontend/.npm-cache/
 /frontend/*.local

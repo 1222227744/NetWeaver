@@ -3,6 +3,7 @@ import { Connection, Monitor, Share } from '@element-plus/icons-vue'
 import { onMounted, reactive, ref } from 'vue'
 
 import { getDashboardNodes, type DashboardNode } from '@/api/dashboard'
+import NodeRelationGraph from '@/components/dashboard/NodeRelationGraph.vue'
 
 // tableData 用 ref 保存表格数组。
 // 这里选择 ref，是因为每次请求回来时会整体替换成一份新的数组。
@@ -36,7 +37,7 @@ const loadOnlineNodes = async () => {
 
   try {
     // 这里调用的是 API 请求层方法。
-    // 当前返回的是 mock JSON，但页面层依旧通过 response.data 结构读取结果。
+    // 当前返回的是 mock JSON，但请求层已经恢复为 axios 标准调用方式。
     const result = await getDashboardNodes()
 
     // API 文档返回的是全部节点，所以这里再过滤出 status === online 的节点。
@@ -112,13 +113,19 @@ onMounted(() => {
       </article>
     </section>
 
+    <!--
+      关系图和表格共用同一份在线节点数据。
+      tableData 更新后，NodeRelationGraph 会自动重新计算 graph 的 nodes 与 links。
+    -->
+    <NodeRelationGraph :online-nodes="tableData" />
+
     <section class="panel-surface p-6">
       <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p class="panel-heading">Node Table</p>
           <h2 class="mt-3 text-xl font-semibold text-slate-900">在线节点列表</h2>
           <p class="mt-2 text-sm leading-6 text-slate-500">
-            当前数据来自 <code>GET /api/v1/dashboard/nodes</code> 的本地 mock JSON，并通过独立请求层读入页面。
+            当前数据来自 <code>GET /api/v1/dashboard/nodes</code> 的 mock 响应，并通过 axios 请求层读入页面。
           </p>
         </div>
 
