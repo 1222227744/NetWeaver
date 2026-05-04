@@ -1,4 +1,4 @@
-package main
+package tun
 
 import (
 	"bufio"
@@ -19,9 +19,11 @@ import (
 	"unsafe"
 
 	"github.com/songgao/water"
+
+	"netweaver-backend/pkg/config"
 )
 
-func main() {
+func Run(args []string) error {
 	var ifName string
 	var bufSize int
 	var bootstrap bool
@@ -29,16 +31,19 @@ func main() {
 	var ownerID int
 	var groupID int
 
-	flag.StringVar(&ifName, "ifname", "tuno", "TUN interface name")
-	flag.IntVar(&bufSize, "buf", 2000, "read buffer size")
-	flag.BoolVar(&bootstrap, "bootstrap", false, "create a persistent TUN and set owner/group for non-root runs")
-	flag.BoolVar(&autoICMPEchoReply, "icmp-echo-reply", true, "auto-reply ICMP echo requests received on TUN")
-	flag.IntVar(&ownerID, "owner", -1, "owner uid used with -bootstrap (default current user or SUDO_UID)")
-	flag.IntVar(&groupID, "group", -1, "group gid used with -bootstrap (default current group or SUDO_GID)")
-	flag.Parse()
+	fs := flag.NewFlagSet("node tun", flag.ContinueOnError)
+	fs.StringVar(&ifName, "ifname", config.DefaultTUNName, "TUN interface name")
+	fs.IntVar(&bufSize, "buf", 2000, "read buffer size")
+	fs.BoolVar(&bootstrap, "bootstrap", false, "create a persistent TUN and set owner/group for non-root runs")
+	fs.BoolVar(&autoICMPEchoReply, "icmp-echo-reply", true, "auto-reply ICMP echo requests received on TUN")
+	fs.IntVar(&ownerID, "owner", -1, "owner uid used with -bootstrap (default current user or SUDO_UID)")
+	fs.IntVar(&groupID, "group", -1, "group gid used with -bootstrap (default current group or SUDO_GID)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	if bufSize <= 0 {
-		log.Fatalf("invalid -buf: %d", bufSize)
+		return fmt.Errorf("invalid -buf: %d", bufSize)
 	}
 
 	params := water.PlatformSpecificParams{
@@ -72,9 +77,6 @@ func main() {
 
 	ifce, err := water.New(cfg)
 	if err != nil {
-		// water Linux implementation always touches TUNSETPERSIST. For a persistent
-		// device opened by non-root user, this may fail with EPERM even though
-		// TUNSETIFF itself could succeed. Fallback to direct-open path in that case.
 		if !bootstrap && isPermissionErr(err) {
 			f, name, directErr := openTunDirect(ifName)
 			if directErr == nil {
@@ -82,10 +84,10 @@ func main() {
 				dev = f
 				devName = name
 			} else {
-				log.Fatalf("create/open TUN failed: water=%v, direct=%v\n%s", err, directErr, tunCreateHints(err, ifName))
+				return fmt.Errorf("create/open TUN failed: water=%v, direct=%v\n%s", err, directErr, tunCreateHints(err, ifName))
 			}
 		} else {
-			log.Fatalf("create/open TUN failed: %v\n%s", err, tunCreateHints(err, ifName))
+			return fmt.Errorf("create/open TUN failed: %w\n%s", err, tunCreateHints(err, ifName))
 		}
 	} else {
 		dev = ifce
@@ -98,8 +100,8 @@ func main() {
 		log.Printf("  sudo ip addr add 10.23.0.1/24 dev %s", devName)
 		log.Printf("  sudo ip link set %s up", devName)
 		log.Printf("then run as normal user:")
-		log.Printf("  /usr/local/go/bin/go run . -ifname %s", devName)
-		return
+		log.Printf("  /usr/local/go/bin/go run ./cmd/node -ifname %s", devName)
+		return nil
 	}
 	defer dev.Close()
 
@@ -124,19 +126,27 @@ func main() {
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
+	stopping := make(chan struct{})
 	go func() {
 		<-sigCh
 		fmt.Println()
 		log.Println("signal received, exiting")
+		close(stopping)
 		_ = dev.Close()
-		os.Exit(0)
 	}()
 
 	buf := make([]byte, bufSize)
 	for {
 		n, err := dev.Read(buf)
 		if err != nil {
-			log.Fatalf("read failed: %v", err)
+			select {
+			case <-stopping:
+				return nil
+			default:
+				return fmt.Errorf("read failed: %w", err)
+			}
 		}
 
 		packet := buf[:n]
@@ -230,14 +240,14 @@ func tunCreateHints(err error, ifName string) string {
 	switch {
 	case errors.Is(err, syscall.EPERM), errors.Is(err, os.ErrPermission):
 		b.WriteString("1) Recommended one-time bootstrap (root), then run without sudo:\n")
-		b.WriteString(fmt.Sprintf("   `sudo /usr/local/go/bin/go run . -bootstrap -ifname %s`\n", ifName))
-		b.WriteString(fmt.Sprintf("   `/usr/local/go/bin/go run . -ifname %s`\n", ifName))
+		b.WriteString(fmt.Sprintf("   `sudo /usr/local/go/bin/go run ./cmd/node -bootstrap -ifname %s`\n", ifName))
+		b.WriteString(fmt.Sprintf("   `/usr/local/go/bin/go run ./cmd/node -ifname %s`\n", ifName))
 		b.WriteString("2) Or run with NET_ADMIN privilege each time:\n")
-		b.WriteString("   `sudo /usr/local/go/bin/go run .`\n")
+		b.WriteString("   `sudo /usr/local/go/bin/go run ./cmd/node`\n")
 		b.WriteString("3) Or build once and grant capability to the binary (go run temp binaries cannot keep this capability):\n")
-		b.WriteString("   `go build -o tun-sniffer .`\n")
-		b.WriteString("   `sudo setcap cap_net_admin+ep ./tun-sniffer`\n")
-		b.WriteString("   `./tun-sniffer`\n")
+		b.WriteString("   `/usr/local/go/bin/go build -o node ./cmd/node`\n")
+		b.WriteString("   `sudo setcap cap_net_admin+ep ./node`\n")
+		b.WriteString("   `./node`\n")
 		b.WriteString("4) In Docker, start container with: `--cap-add=NET_ADMIN --device /dev/net/tun`\n")
 	case errors.Is(err, syscall.ENOENT):
 		b.WriteString("1) `/dev/net/tun` is missing. Ensure TUN module is loaded:\n")
@@ -371,7 +381,7 @@ func replyICMPEchoIfNeeded(dev io.Writer, packet []byte) (bool, error) {
 	if ihl < 20 || len(packet) < ihl+8 {
 		return false, nil
 	}
-	if packet[9] != 1 { // IPv4 ICMP
+	if packet[9] != 1 {
 		return false, nil
 	}
 
@@ -389,20 +399,18 @@ func replyICMPEchoIfNeeded(dev io.Writer, packet []byte) (bool, error) {
 	}
 
 	icmp := packet[ihl:totalLen]
-	if icmp[0] != 8 || icmp[1] != 0 { // echo request
+	if icmp[0] != 8 || icmp[1] != 0 {
 		return false, nil
 	}
 
 	reply := make([]byte, totalLen)
 	copy(reply, packet[:totalLen])
 
-	// Swap IPv4 source and destination.
 	copy(reply[12:16], packet[16:20])
 	copy(reply[16:20], packet[12:16])
-	reply[8] = 64 // fresh TTL for generated reply
+	reply[8] = 64
 
-	// Rewrite ICMP type + checksums.
-	reply[ihl] = 0 // echo reply
+	reply[ihl] = 0
 	reply[ihl+1] = 0
 	reply[ihl+2] = 0
 	reply[ihl+3] = 0
