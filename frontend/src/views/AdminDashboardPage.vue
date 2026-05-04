@@ -56,12 +56,12 @@ const menuGroups: SidebarMenuGroup[] = [
   <AdminShell
     v-model:active-menu="activeMenu"
     :menu-groups="menuGroups"
-    page-title="在线节点列表"
-    page-description="当前页面按照 API 文档中的节点列表接口结构，使用本地 mock JSON 通过请求层把数据渲染到 Element Plus 表格。"
+    page-title="在线节点与关系预览"
+    page-description="当前页面会读取在线节点接口，并在同一页中展示节点表格、节点关系图，以及节点悬停时的详细信息预览。"
   >
     <template #header-actions>
       <el-tag size="large" round>GET /api/v1/dashboard/nodes</el-tag>
-      <el-tag size="large" round type="success">Mock JSON</el-tag>
+      <el-tag size="large" round type="success">Real API</el-tag>
     </template>
 
     <OnlineNodeTable />

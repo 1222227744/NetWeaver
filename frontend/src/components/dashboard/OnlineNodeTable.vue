@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { Connection, Monitor, Share } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { onMounted, reactive, ref } from 'vue'
+import axios from 'axios'
 
 import { getDashboardNodes, type DashboardNode } from '@/api/dashboard'
 import NodeRelationGraph from '@/components/dashboard/NodeRelationGraph.vue'
@@ -13,6 +15,7 @@ const tableData = ref<DashboardNode[]>([])
 // 这里包含 loading、统计数字和最近一次刷新时间。
 const state = reactive({
   loading: false,
+  errorMessage: '',
   totalNodes: 0,
   onlineNodes: 0,
   totalConnectedPeers: 0,
@@ -24,6 +27,14 @@ const getStatusTagType = (status: DashboardNode['status']) => {
   return status === 'online' ? 'success' : 'info'
 }
 
+const resetOverviewState = () => {
+  state.totalNodes = 0
+  state.onlineNodes = 0
+  state.totalConnectedPeers = 0
+  state.fullConeNodes = 0
+  state.lastUpdatedAt = ''
+}
+
 const updateOverviewState = (allNodes: DashboardNode[], onlineNodes: DashboardNode[]) => {
   state.totalNodes = allNodes.length
   state.onlineNodes = onlineNodes.length
@@ -32,13 +43,46 @@ const updateOverviewState = (allNodes: DashboardNode[], onlineNodes: DashboardNo
   state.lastUpdatedAt = new Date().toLocaleString('zh-CN', { hour12: false })
 }
 
+const getRequestErrorMessage = (error: unknown) => {
+  // axios 请求失败时，优先尝试读取后端返回的 msg 字段。
+  if (axios.isAxiosError(error)) {
+    const responseMessage = (error.response?.data as { msg?: string } | undefined)?.msg
+
+    if (responseMessage) {
+      return responseMessage
+    }
+
+    if (error.code === 'ECONNABORTED') {
+      return '请求超时，后端接口在 10 秒内没有返回数据。'
+    }
+
+    if (error.response) {
+      return `接口请求失败，HTTP 状态码：${error.response.status}`
+    }
+
+    if (error.request) {
+      return '请求已发出，但当前没有收到后端响应。请确认后端服务和接口路由已经启动。'
+    }
+  }
+
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  return '节点接口请求失败，请检查后端服务状态。'
+}
+
 const loadOnlineNodes = async () => {
   state.loading = true
+  state.errorMessage = ''
 
   try {
-    // 这里调用的是 API 请求层方法。
-    // 当前返回的是 mock JSON，但请求层已经恢复为 axios 标准调用方式。
+    // 这里开始真正请求后端接口，不再走本地 mock 数据。
     const result = await getDashboardNodes()
+
+    if (result.code !== 200) {
+      throw new Error(result.msg || '节点列表接口返回失败。')
+    }
 
     // API 文档返回的是全部节点，所以这里再过滤出 status === online 的节点。
     const allNodes = result.data.nodes
@@ -46,6 +90,14 @@ const loadOnlineNodes = async () => {
 
     tableData.value = onlineNodes
     updateOverviewState(allNodes, onlineNodes)
+  } catch (error) {
+    // 改成真实接口后，请求失败就不能继续拿旧 mock 数据兜底。
+    // 这里直接清空页面数据，并把失败原因展示出来。
+    tableData.value = []
+    resetOverviewState()
+    state.errorMessage = getRequestErrorMessage(error)
+
+    ElMessage.error(state.errorMessage)
   } finally {
     state.loading = false
   }
@@ -125,7 +177,7 @@ onMounted(() => {
           <p class="panel-heading">Node Table</p>
           <h2 class="mt-3 text-xl font-semibold text-slate-900">在线节点列表</h2>
           <p class="mt-2 text-sm leading-6 text-slate-500">
-            当前数据来自 <code>GET /api/v1/dashboard/nodes</code> 的 mock 响应，并通过 axios 请求层读入页面。
+            当前数据直接来自 <code>GET /api/v1/dashboard/nodes</code> 真实接口，并通过 axios 请求层读入页面。
           </p>
         </div>
 
@@ -134,6 +186,15 @@ onMounted(() => {
           <el-button :loading="state.loading" type="primary" @click="loadOnlineNodes">重新加载</el-button>
         </div>
       </div>
+
+      <el-alert
+        v-if="state.errorMessage"
+        :title="state.errorMessage"
+        type="error"
+        show-icon
+        :closable="false"
+        class="mt-6"
+      />
 
       <!--
         el-table 直接绑定 ref 保存的 tableData。

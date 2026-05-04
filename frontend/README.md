@@ -13,12 +13,13 @@
 ```text
 frontend/
 ├── src/
-│   ├── api/                 # 前端请求层 / mock 数据入口
+│   ├── api/                 # 前端请求层与数据转换入口
 │   ├── assets/              # 全局样式与静态资源
 │   ├── components/          # 公共组件
-│   │   ├── dashboard/       # 业务组件（在线节点表格）
+│   │   ├── dashboard/       # 业务组件（节点表格、关系图、悬停详情卡片）
 │   │   └── layout/          # 布局组件（侧边栏、顶部栏、页面骨架）
 │   └── views/               # 页面级组件
+├── .env.example             # 前端环境变量示例
 ├── index.html               # 前端 HTML 入口
 ├── package.json             # 前端依赖与脚本
 ├── tailwind.config.js       # Tailwind 配置
@@ -73,7 +74,7 @@ frontend/
 
 参考文档：
 
-- [NetWeaver v1.0 API接口文档.md](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/NetWeaver%20v1.0%20API接口文档.md)
+- [NetWeaver v1.0 API接口文档.md](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/docs/NetWeaver%20v1.0%20API接口文档.md)
 
 具体改动：
 
@@ -279,3 +280,178 @@ npm run preview
 - 正式构建结果只认 `frontend/dist`
 - 若为了排障临时使用了自定义 `--outDir`，验证完成后必须立即删除对应目录
 - 不再保留 `verify-dist*`、测试缓存目录或其他一次性目录
+
+### 2026-05-03 第四次开发：移除 Mock，切到真实接口请求
+
+目标：
+
+- 删除 `dashboard` 请求层里原来写死的 mock 数据
+- 改成通过 axios 请求真实接口
+- 保持节点表格、概览卡片、节点关系图继续复用同一份接口数据
+- 记录当前前端到底已经接入了 API 文档里的哪些接口
+
+本次具体改动：
+
+- 修改 [src/api/dashboard.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/api/dashboard.ts)
+  - 删除原来的 axios `adapter` mock 实现
+  - 删除写死在文件里的本地节点 JSON
+  - 新增 `dashboardHttp` 请求实例
+  - `getDashboardNodes()` 改为真正请求 `GET /api/v1/dashboard/nodes`
+- 修改 [src/components/dashboard/OnlineNodeTable.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/OnlineNodeTable.vue)
+  - `loadOnlineNodes()` 改为直接消费真实接口返回
+  - 增加接口失败时的错误提示、状态清空和说明注释
+  - 删除页面里“当前还是 mock 响应”的说明
+- 修改 [src/views/AdminDashboardPage.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/views/AdminDashboardPage.vue)
+  - 页面头部标记从 `Mock JSON` 改为 `Real API`
+  - 页面说明改为“通过 axios 请求真实接口”
+- 修改 [vite.config.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/vite.config.ts)
+  - 新增 `/api` 代理到 `http://127.0.0.1:8080`
+  - `npm run dev` 和 `npm run preview` 都会按这个代理规则转发接口请求
+- 修改 [src/env.d.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/env.d.ts)
+  - 补充 `VITE_API_BASE_URL` 类型声明
+
+当前前端已经实际使用到的接口：
+
+- `GET /api/v1/dashboard/nodes`
+  - 用途：在线节点表格
+  - 用途：页面顶部 4 个统计卡片的数据来源
+  - 用途：ECharts 节点关系图的原始节点数组来源
+
+当前前端还没有实际使用到的控制台接口：
+
+- `GET /api/v1/dashboard/stats`
+
+与后端现状有关的事实记录：
+
+- 当前仓库里的 Go 控制器代码还没有实现 `GET /api/v1/dashboard/nodes`
+- 当前后端只看得到根路径 `/` 的 `Ping` 接口
+- 所以前端源码虽然已经切到真实请求模式，但如果后端还没补这个路由，页面会显示接口失败提示，而不会再回退到 mock 数据
+
+### 2026-05-03 第五次开发：节点悬停详情卡片与可切换后端地址
+
+目标：
+
+- 不再预设一个并不存在的链路延迟接口
+- 保留折线图画图逻辑，但先只作为本地展示预览
+- 把折线图从页面固定区块改为“节点悬停时，在鼠标附近显示”
+- 保持本机联调和局域网联调都能通过环境变量切换后端地址
+
+本次具体改动：
+
+- 修改 [src/api/dashboard.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/api/dashboard.ts)
+  - 删除先前自行约定的链路延迟接口类型和请求方法
+  - 当前请求层重新只保留 `GET /api/v1/dashboard/nodes`
+- 重写 [src/components/dashboard/LinkLatencyChart.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/LinkLatencyChart.vue)
+  - 组件职责从“实时请求延迟接口”改为“节点悬停详情卡片”
+  - 组件接收当前悬停节点与屏幕坐标
+  - 卡片中显示节点基本信息和一张本地生成的折线图
+  - 每个节点的折线图都依据自身字段生成，因此不同节点会呈现不同走势
+- 修改 [src/components/dashboard/NodeRelationGraph.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/NodeRelationGraph.vue)
+  - 监听 ECharts 节点的 `mouseover`、`mousemove`、`mouseout`
+  - 鼠标悬停在节点上时，在鼠标附近显示详情卡片
+  - 鼠标移出节点后隐藏卡片
+  - 节点原生 tooltip 不再显示，避免和自定义悬浮卡片重叠
+- 修改 [src/components/dashboard/OnlineNodeTable.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/OnlineNodeTable.vue)
+  - 删除页面中固定放置的链路延迟图区域
+- 修改 [src/views/AdminDashboardPage.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/views/AdminDashboardPage.vue)
+  - 页面标题更新为“在线节点与关系预览”
+  - 页面描述同步改为“节点悬停时的详细信息预览”
+- 修改 [vite.config.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/vite.config.ts)
+  - 代理地址改为从环境变量读取
+- 修改 [src/env.d.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/env.d.ts)
+  - 当前只保留 `VITE_API_BASE_URL` 类型声明
+- 新建 [.env.example](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/.env.example)
+  - 提供本机联调和局域网联调的配置模板
+
+当前前端已经实际使用到的接口：
+
+- `GET /api/v1/dashboard/nodes`
+
+当前折线图的性质说明：
+
+- 折线图还没有接真实后端接口
+- 当前只是节点详情卡片中的本地演示图
+- 它的作用是先把悬浮展示结构、ECharts 画图逻辑和交互方式定下来
+- 等后端以后补充真实链路延迟接口后，再把本地演示数据替换为真实数据
+
+如何修改网络请求网址：
+
+1. 复制环境变量模板
+
+开发联调时使用：
+
+```powershell
+cd d:\Documents\WorkSpace\30-Playground\frontend\planA\NetWeaver\frontend
+Copy-Item .env.example .env.development.local
+```
+
+如果你后面要验证 `npm run build` 或 `npm run preview`，则再复制一份：
+
+```powershell
+Copy-Item .env.example .env.production.local
+```
+
+2. 本机联调时，保持：
+
+```env
+VITE_PROXY_TARGET=http://127.0.0.1:8080
+```
+
+3. 切到局域网联调时，把它改成队友机器的局域网地址，例如：
+
+```env
+VITE_PROXY_TARGET=http://192.168.1.23:8080
+```
+
+4. 修改完成后，必须重新启动对应模式的前端服务：
+
+```powershell
+npm run dev
+```
+
+如果你在验证生产预览，则重启：
+
+```powershell
+npm run preview
+```
+
+关于 `VITE_API_BASE_URL` 和 `VITE_PROXY_TARGET` 的区别：
+
+- `VITE_PROXY_TARGET`
+  - 给 Vite 开发代理使用
+  - 浏览器仍然请求 `/api/...`
+  - 由 Vite 转发到真实后端
+  - 本地开发和局域网联调时，优先推荐改这个，通常更省事
+- `VITE_API_BASE_URL`
+  - 给前端浏览器端 axios 直接使用
+  - 会让浏览器直接请求完整后端地址
+  - 只有在你明确需要绕过 Vite 代理时才改它
+
+### 2026-05-03 第六次开发：悬浮卡片层级与节点交互修正
+
+目标：
+
+- 修正悬浮详情卡片会被下方在线节点列表遮挡的问题
+- 恢复节点拖拽能力
+- 修正悬浮卡片总是在第一个节点附近展开的问题
+
+本次具体改动：
+
+- 修改 [src/components/dashboard/LinkLatencyChart.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/LinkLatencyChart.vue)
+  - 使用 `Teleport` 将悬浮详情卡片直接渲染到 `body`
+  - 提高悬浮卡片层级，避免被页面后续区块遮挡
+- 修改 [src/components/dashboard/NodeRelationGraph.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/NodeRelationGraph.vue)
+  - 把 ECharts 节点配置从 `draggable: false` 改为 `draggable: true`
+  - 悬浮定位不再使用不稳定的 `offsetX`、`offsetY`
+  - 改为读取原生鼠标事件的 `clientX`、`clientY`
+  - 节点拖拽过程中也同步更新悬浮卡片位置
+
+本次页面结果：
+
+- 节点现在可以直接拖拽
+- 悬浮详情卡片会出现在当前鼠标所在节点附近
+- 悬浮卡片不会再被下方在线节点列表遮挡
+
+验证结果：
+
+- `npx vue-tsc --noEmit` 已通过
