@@ -17,21 +17,24 @@ sequenceDiagram
     B->>Server: 发送 Binding Request (询问：我在公网的地址是什么？)
     Server-->>B: 发送 Binding Response (获取 B 的公网地址)
     
-    Note over A, B: 此时 A 和 B 通过某种信令通道，交换了彼此的公网地址
+    Note over A, B: 此时 A 和 B 通过信令通道，交换了彼此的 NAT 类型与公网地址
     
     %% 第二阶段：尝试 UDP 打洞
     A->>NATB: 发送 UDP 探测包 (尝试打洞，大概率被 NAT B 丢弃，但 NAT A 留下了出站记录)
     B->>NATA: 发送 UDP 探测包 (因为 NAT A 已有对应记录，此时打洞成功！)
     
-    %% 第三阶段：数据传输
-    A->>B: 建立直接 P2P 通信信道
-    B->>A: 建立直接 P2P 通信信道
+    %% 第三阶段：数据传输 (成功建立 P2P 边)
+    A->>B: [建立 P2P 直连边] 开启 UDP 直连隧道通信
+    B->>A: [建立 P2P 直连边] 开启 UDP 直连隧道通信
+    Note over A, B: 成功实现 L2/L3 层透明互联，大幅降低对中心服务器的带宽依赖
     
-    %% 备选逻辑：打洞失败
-    alt 打洞失败 (例如遇到对称型 NAT)
-        A->>Server: 连接 TURN 服务器申请中继
-        B->>Server: 连接 TURN 服务器申请中继
-        Note over A, B: 无法直连，所有 P2P 流量均通过 TURN 服务器中继转发
+    %% 备选逻辑：打洞失败 (建立 Relay 边)
+    alt 打洞失败 (例如遇到复杂的对称型 NAT)
+        A->>Server: [建立 Relay 中转边] 连接 TURN 服务器申请转发
+        B->>Server: [建立 Relay 中转边] 连接 TURN 服务器申请转发
+        Server-->>A: 中继下发 B 的数据包
+        Server-->>B: 中继下发 A 的数据包
+        Note over A, B: 无法直连，回退至 Relay 模式，所有流量均通过 TURN 服务器中转
     end
 ```
 
