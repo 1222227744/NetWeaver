@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -39,12 +40,30 @@ func (c *Client) Ping(ctx context.Context) (protocol.PingResponse, error) {
 	return result, nil
 }
 
-func (c *Client) RegisterNode(ctx context.Context, req protocol.RegisterNodeRequest) (protocol.NodeInfo, error) {
-	var result protocol.NodeInfo
-	if err := c.postJSON(ctx, "/nodes", req, &result); err != nil {
-		return protocol.NodeInfo{}, err
+func (c *Client) RegisterNode(ctx context.Context, req protocol.RegisterNodeRequest) (protocol.RegisterNodeResponse, error) {
+	var result protocol.APIResponse[protocol.RegisterNodeResponse]
+	if err := c.postJSON(ctx, "/api/v1/nodes/register", req, &result); err != nil {
+		return protocol.RegisterNodeResponse{}, err
 	}
-	return result, nil
+	return result.Data, nil
+}
+
+func (c *Client) Heartbeat(ctx context.Context, nodeID string, req protocol.HeartbeatRequest) (protocol.HeartbeatResponse, error) {
+	var result protocol.APIResponse[protocol.HeartbeatResponse]
+	path := "/api/v1/nodes/" + url.PathEscape(nodeID) + "/heartbeat"
+	if err := c.postJSON(ctx, path, req, &result); err != nil {
+		return protocol.HeartbeatResponse{}, err
+	}
+	return result.Data, nil
+}
+
+func (c *Client) GetPeers(ctx context.Context, nodeID string) (protocol.PeersResponse, error) {
+	var result protocol.APIResponse[protocol.PeersResponse]
+	path := "/api/v1/nodes/" + url.PathEscape(nodeID) + "/peers"
+	if err := c.getJSON(ctx, path, &result); err != nil {
+		return protocol.PeersResponse{}, err
+	}
+	return result.Data, nil
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, out any) error {

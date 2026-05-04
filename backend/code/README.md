@@ -8,18 +8,18 @@
 项目运行目录是：
 
 ```bash
-cd /home/xyc20060125/projects/go_code/backend/code
+cd /home/xyc20060125/projects/temp/NetWeaver
 ```
 
-> 注意：当前机器上的 `go` 命令没有加入 `PATH`，但 Go 已安装在 `/usr/local/go/bin/go`。下面的命令默认使用完整路径。
+> 当前仓库根目录已经配置了 `go.work`，可以直接在仓库根目录运行后端 Go 模块。
 
 ## 运行 HTTP 后端服务
 
 启动控制器服务：
 
 ```bash
-cd /home/xyc20060125/projects/go_code/backend/code
-/usr/local/go/bin/go run ./cmd/controller
+cd /home/xyc20060125/projects/temp/NetWeaver
+go run ./backend/code/cmd/controller
 ```
 
 默认监听地址是：
@@ -43,21 +43,41 @@ curl http://127.0.0.1:8080/ping
 查看节点列表：
 
 ```bash
-curl http://127.0.0.1:8080/nodes
+curl http://127.0.0.1:8080/api/v1/dashboard/nodes
+```
+
+查看全局统计：
+
+```bash
+curl http://127.0.0.1:8080/api/v1/dashboard/stats
 ```
 
 注册一个节点：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/nodes \
+curl -X POST http://127.0.0.1:8080/api/v1/nodes/register \
   -H "Content-Type: application/json" \
-  -d '{"id":"node1","address":"127.0.0.1:9001"}'
+  -d '{"machine_id":"e4:5f:01:aa:bb:cc","hostname":"ubuntu-server-01","os":"linux","local_ip":"192.168.1.10"}'
+```
+
+节点心跳：
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/v1/nodes/{node_id}/heartbeat \
+  -H "Content-Type: application/json" \
+  -d '{"nat_type":"Full Cone","public_ip":"203.0.113.5","public_port":54321,"current_rx_bytes":1024560,"current_tx_bytes":2048000}'
+```
+
+拉取对等节点：
+
+```bash
+curl http://127.0.0.1:8080/api/v1/nodes/{node_id}/peers
 ```
 
 如果需要更换端口，例如监听 `9090`：
 
 ```bash
-/usr/local/go/bin/go run ./cmd/controller -addr :9090
+go run ./backend/code/cmd/controller -addr :9090
 ```
 
 ## 运行 P2P 节点
@@ -67,15 +87,15 @@ curl -X POST http://127.0.0.1:8080/nodes \
 终端 1：
 
 ```bash
-cd /home/xyc20060125/projects/go_code/backend/code
-/usr/local/go/bin/go run ./cmd/node p2p -profile A
+cd /home/xyc20060125/projects/temp/NetWeaver
+go run ./backend/code/cmd/node p2p -profile A
 ```
 
 终端 2：
 
 ```bash
-cd /home/xyc20060125/projects/go_code/backend/code
-/usr/local/go/bin/go run ./cmd/node p2p -profile B
+cd /home/xyc20060125/projects/temp/NetWeaver
+go run ./backend/code/cmd/node p2p -profile B
 ```
 
 默认配置：
@@ -87,7 +107,7 @@ cd /home/xyc20060125/projects/go_code/backend/code
 也可以手动指定节点参数：
 
 ```bash
-/usr/local/go/bin/go run ./cmd/node p2p \
+go run ./backend/code/cmd/node p2p \
   -name MyNode \
   -local 127.0.0.1:9010 \
   -peer 127.0.0.1:9011 \
@@ -104,8 +124,8 @@ TUN 模式会创建虚拟网卡，通常需要 `sudo` 或 `NET_ADMIN` 权限。
 一次性初始化：
 
 ```bash
-cd /home/xyc20060125/projects/go_code/backend/code
-sudo /usr/local/go/bin/go run ./cmd/node -bootstrap -ifname tuno
+cd /home/xyc20060125/projects/temp/NetWeaver
+sudo /usr/local/go/bin/go run ./backend/code/cmd/node -bootstrap -ifname tuno
 ```
 
 然后配置网卡：
@@ -118,41 +138,29 @@ sudo ip link set tuno up
 之后普通运行：
 
 ```bash
-/usr/local/go/bin/go run ./cmd/node -ifname tuno
+go run ./backend/code/cmd/node -ifname tuno
 ```
 
 也可以直接以 root 权限运行：
 
 ```bash
-sudo /usr/local/go/bin/go run ./cmd/node
+sudo /usr/local/go/bin/go run ./backend/code/cmd/node
 ```
 
 ## 配置 Go PATH
 
-为了以后不用每次写 `/usr/local/go/bin/go`，可以把 Go 加入 `PATH`。
+Go 1.24.0 已安装在 `/usr/local/go`，并且本机 shell 配置已经把 `/usr/local/go/bin` 加入 `PATH`。
 
-当前终端临时生效：
+如果旧终端里还找不到 `go`，重新打开终端，或者手动加载配置：
 
 ```bash
-export PATH=/usr/local/go/bin:$PATH
+source ~/.profile
 ```
 
-之后就可以直接使用：
+确认版本：
 
 ```bash
-go run ./cmd/controller
-```
-
-如果希望长期生效，可以把下面这行加入 shell 配置文件，例如 `~/.bashrc`：
-
-```bash
-export PATH=/usr/local/go/bin:$PATH
-```
-
-然后重新加载配置：
-
-```bash
-source ~/.bashrc
+go version
 ```
 
 ## 编译验证
@@ -160,8 +168,8 @@ source ~/.bashrc
 检查整个项目是否能正常编译：
 
 ```bash
-cd /home/xyc20060125/projects/go_code/backend/code
-/usr/local/go/bin/go test ./...
+cd /home/xyc20060125/projects/temp/NetWeaver
+go test ./backend/code/...
 ```
 
 当前项目没有测试文件，但该命令可以确认所有包都能正常编译。
