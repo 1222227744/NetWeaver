@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import * as echarts from 'echarts'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 import { buildDashboardGraphData, type DashboardNode } from '@/api/dashboard'
+import LinkLatencyChart from '@/components/dashboard/LinkLatencyChart.vue'
 
 const props = defineProps<{
   onlineNodes: DashboardNode[]
@@ -10,6 +11,13 @@ const props = defineProps<{
 
 const chartContainer = ref<HTMLDivElement | null>(null)
 const chartInstance = ref<echarts.ECharts | null>(null)
+const hoveredNode = ref<DashboardNode | null>(null)
+
+const hoverPanel = reactive({
+  visible: false,
+  left: 0,
+  top: 0
+})
 
 // 关系图的数据不是接口直接返回的，而是从节点数组转换而来。
 // 这里统一在 computed 里生成 ECharts graph 需要的 nodes 和 links。
@@ -22,6 +30,111 @@ const relationSummary = computed(() => {
 
   return `当前关系图使用前两个在线节点生成一条链路，链路类型为 ${graphData.value.links[0].relationText}。`
 })
+
+const updateHoverPanelPosition = (clientX: number, clientY: number) => {
+  const cardWidth = 360
+  const cardHeight = 420
+  const viewportPadding = 18
+  const cursorOffsetX = 24
+  const cursorOffsetY = 20
+
+  let nextLeft = clientX + cursorOffsetX
+  let nextTop = clientY - cardHeight - cursorOffsetY
+
+  if (nextLeft + cardWidth > window.innerWidth - viewportPadding) {
+    nextLeft = window.innerWidth - cardWidth - viewportPadding
+  }
+
+  if (nextLeft < viewportPadding) {
+    nextLeft = viewportPadding
+  }
+
+  if (nextTop < viewportPadding) {
+    nextTop = clientY + cursorOffsetY
+  }
+
+  if (nextTop + cardHeight > window.innerHeight - viewportPadding) {
+    nextTop = window.innerHeight - cardHeight - viewportPadding
+  }
+
+  hoverPanel.left = nextLeft
+  hoverPanel.top = nextTop
+}
+
+const findDashboardNodeById = (nodeId: string) => {
+  return props.onlineNodes.find((node) => node.node_id === nodeId) ?? null
+}
+
+const bindChartHoverEvents = () => {
+  if (!chartInstance.value) {
+    return
+  }
+
+  chartInstance.value.off('mouseover')
+  chartInstance.value.off('mousemove')
+  chartInstance.value.off('mouseout')
+  chartInstance.value.off('drag')
+  chartInstance.value.getZr().off('globalout')
+
+  chartInstance.value.on('mouseover', (params: Record<string, unknown>) => {
+    if (params.dataType !== 'node') {
+      return
+    }
+
+    const nodeData = params.data as Record<string, string>
+    const targetNode = findDashboardNodeById(nodeData.id)
+
+    if (!targetNode) {
+      return
+    }
+
+    hoveredNode.value = targetNode
+    hoverPanel.visible = true
+
+    const eventObject = (params.event as { event?: MouseEvent } | undefined)?.event
+
+    if (eventObject) {
+      updateHoverPanelPosition(eventObject.clientX, eventObject.clientY)
+    }
+  })
+
+  chartInstance.value.on('mousemove', (params: Record<string, unknown>) => {
+    if (params.dataType !== 'node' || !hoverPanel.visible) {
+      return
+    }
+
+    const eventObject = (params.event as { event?: MouseEvent } | undefined)?.event
+
+    if (eventObject) {
+      updateHoverPanelPosition(eventObject.clientX, eventObject.clientY)
+    }
+  })
+
+  chartInstance.value.on('mouseout', (params: Record<string, unknown>) => {
+    if (params.dataType !== 'node') {
+      return
+    }
+
+    hoverPanel.visible = false
+  })
+
+  chartInstance.value.getZr().on('globalout', () => {
+    hoverPanel.visible = false
+  })
+
+  // 节点拖拽过程中也同步更新悬浮卡片的位置，这样卡片会跟着鼠标走。
+  chartInstance.value.on('drag', (params: Record<string, unknown>) => {
+    if (params.dataType !== 'node' || !hoverPanel.visible) {
+      return
+    }
+
+    const eventObject = (params.event as { event?: MouseEvent } | undefined)?.event
+
+    if (eventObject) {
+      updateHoverPanelPosition(eventObject.clientX, eventObject.clientY)
+    }
+  })
+}
 
 const renderChart = async () => {
   await nextTick()
@@ -44,14 +157,7 @@ const renderChart = async () => {
           return `链路类型：${edgeData.relationText}`
         }
 
-        const nodeData = params.data as Record<string, string | number>
-        return [
-          `主机名：${nodeData.hostname}`,
-          `节点 ID：${nodeData.id}`,
-          `虚拟 IP：${nodeData.virtualIp}`,
-          `公网 IP：${nodeData.publicIp}`,
-          `NAT 类型：${nodeData.natType}`
-        ].join('<br/>')
+        return ''
       }
     },
     series: [
@@ -59,7 +165,7 @@ const renderChart = async () => {
         type: 'graph',
         layout: 'none',
         roam: true,
-        draggable: false,
+        draggable: true,
         symbol: 'circle',
         edgeSymbol: ['none', 'arrow'],
         edgeSymbolSize: [0, 12],
@@ -87,6 +193,8 @@ const renderChart = async () => {
       }
     ]
   })
+
+  bindChartHoverEvents()
 }
 
 const handleResize = () => {
@@ -108,6 +216,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
+  chartInstance.value?.getZr().off('globalout')
   chartInstance.value?.dispose()
   chartInstance.value = null
 })
@@ -134,5 +243,11 @@ onBeforeUnmount(() => {
     </div>
 
     <div ref="chartContainer" class="mt-6 h-[360px] rounded-[1.5rem] border border-slate-200 bg-white" />
+
+    <LinkLatencyChart
+      :node="hoveredNode"
+      :visible="hoverPanel.visible"
+      :position="{ left: hoverPanel.left, top: hoverPanel.top }"
+    />
   </section>
 </template>

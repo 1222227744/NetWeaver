@@ -1,5 +1,4 @@
 import axios from 'axios'
-import type { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 
 // 全局响应结构按照 API 文档统一定义。
 // 这样后面无论接真实后端还是继续扩展其他接口，返回值结构都能保持一致。
@@ -67,76 +66,22 @@ export interface DashboardGraphData {
   links: GraphLinkItem[]
 }
 
-// 当前分支先没有真实后端，所以把接口文档里的数据格式直接写成 mock JSON。
-// 这里故意保留了一条 offline 数据，页面里会再过滤出“在线节点列表”。
-const mockDashboardNodesResponse: ApiResponse<DashboardNodesData> = {
-  code: 200,
-  msg: 'success',
-  data: {
-    nodes: [
-      {
-        node_id: 'nw-node-a1b2',
-        hostname: 'ubuntu-server-01',
-        virtual_ip: '10.0.0.2',
-        public_ip: '203.0.113.5',
-        nat_type: 'Full Cone',
-        status: 'online',
-        connected_peers: 3
-      },
-      {
-        node_id: 'nw-node-c3d4',
-        hostname: 'macbook-pro',
-        virtual_ip: '10.0.0.3',
-        public_ip: '198.51.100.12',
-        nat_type: 'Symmetric',
-        status: 'online',
-        connected_peers: 3
-      },
-      {
-        node_id: 'nw-node-e5f6',
-        hostname: 'windows-lab',
-        virtual_ip: '10.0.0.4',
-        public_ip: '192.0.2.88',
-        nat_type: 'Port Restricted Cone',
-        status: 'offline',
-        connected_peers: 0
-      },
-      {
-        node_id: 'nw-node-g7h8',
-        hostname: 'edge-gateway-01',
-        virtual_ip: '10.0.0.5',
-        public_ip: '203.0.113.19',
-        nat_type: 'Full Cone',
-        status: 'online',
-        connected_peers: 5
-      }
-    ]
-  }
-}
-
-const dashboardNodesMockAdapter: AxiosAdapter = async (
-  config: InternalAxiosRequestConfig
-): Promise<AxiosResponse<ApiResponse<DashboardNodesData>>> => {
-  // 当前还没有接真实后端，所以依旧通过 mock 数据返回。
-  // 但请求层已经切回 axios 标准写法，后续替换真实接口时不需要动页面组件。
-  await new Promise((resolve) => setTimeout(resolve, 300))
-
-  return {
-    data: mockDashboardNodesResponse,
-    status: 200,
-    statusText: 'OK',
-    headers: {},
-    config
-  }
-}
+// dashboardHttp 专门负责控制台相关接口请求。
+// 这里不再写死 mock 数据，而是直接发真实 HTTP 请求。
+const dashboardHttp = axios.create({
+  // 如果以后单独配置了 VITE_API_BASE_URL，就优先用它。
+  // 没配置时保持空字符串，表示继续走当前站点同源地址。
+  baseURL: import.meta.env.VITE_API_BASE_URL ?? '',
+  timeout: 10000
+})
 
 export const getDashboardNodes = async (): Promise<ApiResponse<DashboardNodesData>> => {
-  // 这里保留真实接口的 URL，和 API 文档保持一致：
+  // 真实接口路径直接与 API 文档保持一致：
   // GET /api/v1/dashboard/nodes
-  // 当前虽然返回的是 mock 数据，但调用方式已经恢复为 axios.get(...).data。
-  const response = await axios.get<ApiResponse<DashboardNodesData>>('/api/v1/dashboard/nodes', {
-    adapter: dashboardNodesMockAdapter
-  })
+  // 页面组件只关心 response.data，不需要知道底层是 axios 还是其他实现。
+  const response = await dashboardHttp.get<ApiResponse<DashboardNodesData>>(
+    '/api/v1/dashboard/nodes'
+  )
 
   return response.data
 }
