@@ -16,6 +16,10 @@ const emit = defineEmits<{
 </script>
 
 <template>
+  <!--
+    sticky top-4 的意思可以简单理解成：
+    页面往下滚动时，顶部栏会尽量保持在视口顶部附近，而不是立刻滚走。
+  -->
   <header class="panel-surface sticky top-4 z-20 px-4 py-4 sm:px-6">
     <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
       <div class="flex items-start gap-3">
@@ -48,6 +52,7 @@ const emit = defineEmits<{
           slot 可以理解成“预留插槽”：
           父组件想往这里塞什么内容都行。
           现在如果父组件没传内容，就显示下面这两个默认按钮。
+          这就是为什么 AdminDashboardPage.vue 能往这里插 GET /api/v1/dashboard/* 标签。
         -->
         <slot name="actions">
           <el-button plain>

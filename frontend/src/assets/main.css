@@ -7,7 +7,8 @@
 @tailwind utilities;
 
 :root {
-  /* 这里放全局的基础视觉设置，整个页面都会继承。 */
+  /* 这里放全局的基础视觉设置，整个页面都会继承。
+     可以把 :root 理解成“整个网页的默认设定中心”。 */
   color: #0f172a;
   background-color: #f4f7fb;
   font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
@@ -19,14 +20,16 @@
 }
 
 * {
-  /* 让 padding 和 border 计算进元素宽高，布局更稳定。 */
+  /* 让 padding 和 border 计算进元素宽高，布局更稳定。
+     这是现代页面里非常常见的基础设置。 */
   box-sizing: border-box;
 }
 
 html,
 body,
 #app {
-  /* 让页面至少和屏幕一样高，后台布局更容易撑满整屏。 */
+  /* 让页面至少和屏幕一样高，后台布局更容易撑满整屏。
+     这里顺便把默认 margin 去掉，避免浏览器自带白边。 */
   min-height: 100%;
   margin: 0;
 }
@@ -44,13 +47,15 @@ button,
 input,
 textarea,
 select {
-  /* 表单元素默认也继承全局字体，避免浏览器各自的默认样式不统一。 */
+  /* 表单元素默认也继承全局字体，避免浏览器各自的默认样式不统一。
+     不然你会经常看到“正文是一种字体，按钮又是另一种字体”的情况。 */
   font: inherit;
 }
 
 @layer components {
   /* 常用卡片外观：圆角、边框、半透明白底、阴影。
-     以后页面里想做一个“面板/卡片”，直接复用这个类即可。 */
+     以后页面里想做一个“面板/卡片”，直接复用这个类即可。
+     当前项目里的顶部栏、统计卡片、表格外层，都是沿用这套外观。 */
   .panel-surface {
     @apply rounded-[1.75rem] border border-slate-200/70 bg-white/85 shadow-panel backdrop-blur;
   }

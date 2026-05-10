@@ -8,6 +8,59 @@
 - 当前主页面入口：[src/views/AdminDashboardPage.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/views/AdminDashboardPage.vue)
 - 当前布局骨架：[src/components/layout/AdminShell.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/layout/AdminShell.vue)
 
+## 新手接手顺序
+
+如果是刚学 Vue 的同学接手，建议不要一上来就随机点文件，而是按下面顺序读：
+
+1. [index.html](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/index.html)
+   - 先理解浏览器最开始打开的是什么
+2. [src/main.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/main.ts)
+   - 理解 Vue 应用是怎么启动的
+3. [src/App.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/App.vue)
+   - 理解当前最外层到底显示哪个页面
+4. [src/views/AdminDashboardPage.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/views/AdminDashboardPage.vue)
+   - 理解页面入口怎样把布局和业务组件拼起来
+5. [src/components/layout/AdminShell.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/layout/AdminShell.vue)
+   - 理解后台页面骨架
+6. [src/components/layout/AdminSidebar.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/layout/AdminSidebar.vue)
+   - 理解侧边栏菜单数据怎么显示
+7. [src/components/layout/AdminTopbar.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/layout/AdminTopbar.vue)
+   - 理解顶部栏、插槽和移动端抽屉按钮
+8. [src/components/dashboard/OnlineNodeTable.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/OnlineNodeTable.vue)
+   - 这是当前前端业务主线，负责请求控制台数据并驱动页面
+9. [src/components/dashboard/NodeRelationGraph.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/NodeRelationGraph.vue)
+   - 理解关系图怎么显示，悬停事件怎么往父组件回传
+10. [src/components/dashboard/LinkLatencyChart.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/LinkLatencyChart.vue)
+    - 理解悬浮卡片和折线图怎么显示
+11. [src/api/dashboard.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/api/dashboard.ts)
+    - 理解前端到底请求了哪些接口，以及图数据如何转换
+12. [vite.config.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/vite.config.ts)、[.env.example](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/.env.example)、[src/env.d.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/env.d.ts)
+    - 理解前端联调时到底向哪个地址请求后端
+13. [tailwind.config.js](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/tailwind.config.js)、[postcss.config.js](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/postcss.config.js)、[src/assets/main.css](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/assets/main.css)
+    - 理解样式系统从哪里来
+
+## 关于“为什么有些文件不能直接写注释”
+
+前端目录里大部分文件都已经补了详细注释，但有两个标准 JSON 文件不适合直接写注释：
+
+- [package.json](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/package.json)
+- [package-lock.json](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/package-lock.json)
+
+原因：
+
+- 标准 JSON 语法本身不支持注释
+- 强行往里面塞伪注释字段，反而会让接手的人误以为它们是业务配置
+
+阅读这两个文件时，建议这样理解：
+
+- `package.json`
+  - 看 `scripts`：知道怎么运行、构建、预览前端
+  - 看 `dependencies`：知道项目运行时依赖哪些库
+  - 看 `devDependencies`：知道项目开发和构建时依赖哪些工具
+- `package-lock.json`
+  - 主要用于锁定依赖版本
+  - 日常阅读优先级很低，只有排查依赖版本冲突时才需要重点看
+
 ## 目录说明
 
 ```text
@@ -455,3 +508,71 @@ npm run preview
 验证结果：
 
 - `npx vue-tsc --noEmit` 已通过
+
+### 2026-05-10 第七次开发：控制台真实接口闭环（前端本周任务）
+
+目标：
+
+- 把请求层从“只接一个 nodes 接口”扩展到完整的 `stats / nodes / edges / metrics`
+- 让顶部统计卡片改为消费真实 `stats` 接口
+- 让关系图改为消费真实 `edges` 接口，不再由前端本地猜测连线
+- 让链路折线图组件只负责渲染真实 metrics 数据或显示空态
+- 继续保持开发环境与局域网联调地址通过环境变量切换
+
+本次具体改动：
+
+- 修改 [src/api/dashboard.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/api/dashboard.ts)
+  - 新增 `DashboardStatsData`
+  - 新增 `DashboardEdge`、`DashboardEdgesData`
+  - 新增 `DashboardMetricPoint`、`DashboardNodeMetricsData`
+  - 新增 `getDashboardStats()`
+  - 新增 `getDashboardEdges()`
+  - 新增 `getNodeMetrics()`
+  - `buildDashboardGraphData()` 改为同时接收 `nodes` 与 `edges`
+  - 删除原来“只截前两个节点、前端自行推导一条边”的图数据构造方式
+- 修改 [src/components/dashboard/OnlineNodeTable.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/OnlineNodeTable.vue)
+  - `loadOnlineNodes()` 改为 `loadDashboard()`
+  - 通过 `Promise.all()` 并发请求 `stats / nodes / edges`
+  - 顶部四张卡片改为显示：
+    - `total_nodes`
+    - `online_nodes`
+    - `total_traffic_gb`
+    - `controller_uptime_sec`
+  - 新增 5 秒轮询刷新
+  - 新增 `metricsLoading`
+  - 悬停关系图节点时会发起 `metrics` 请求
+- 修改 [src/components/dashboard/NodeRelationGraph.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/NodeRelationGraph.vue)
+  - props 新增 `edges`、`metrics`
+  - 图数据改为消费真实边数组
+  - 图布局从 `none` 改为 `force`
+  - 新增 `node-hover` 事件，把当前悬停节点抛给父组件，由父组件统一决定是否去请求 metrics
+- 修改 [src/components/dashboard/LinkLatencyChart.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/LinkLatencyChart.vue)
+  - 删除本地随机生成折线图数据的逻辑
+  - 改为通过 `metrics` props 渲染真实时间序列
+  - 如果当前没有监控数据，则显示“暂无链路数据”空态图
+- 修改 [src/views/AdminDashboardPage.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/views/AdminDashboardPage.vue)
+  - 页面标题改为“控制台真实接口总览”
+  - 页面描述改为展示 `dashboard/*` 系列真实接口
+- 修改 [src/env.d.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/env.d.ts)
+  - 增加 `VITE_PROXY_TARGET` 类型声明
+- 修改 [.env.example](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/.env.example)
+  - 明确说明本周默认通过 `VITE_PROXY_TARGET` 切换联调地址
+
+本次页面结果：
+
+- 顶部统计卡片不再由前端根据节点表格自行计算
+- 节点关系图不再只显示“两节点单连线演示图”
+- 页面现在会主动请求真实 `stats / nodes / edges`
+- 当后端 `metrics` 还没有返回有效数据时，悬浮卡片中的折线图会显示空态，而不是继续展示前端随机生成的演示曲线
+
+当前已实际接入的控制台接口：
+
+- `GET /api/v1/dashboard/stats`
+- `GET /api/v1/dashboard/nodes`
+- `GET /api/v1/dashboard/edges`
+- `GET /api/v1/dashboard/nodes/{node_id}/metrics`
+
+当前仍然保留的事实说明：
+
+- 由于接口文档中的 `metrics` 需要 `node_id + target_id`，而当前页面还没有“目标对端节点选择器”，本次先用“当前悬停节点自己的 node_id”去接通真实请求链路
+- 这意味着：如果后端还没有按这个最小调用方式返回数据，前端会正确显示空态，而不是自己伪造一条曲线

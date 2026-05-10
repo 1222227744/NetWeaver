@@ -1,5 +1,12 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  // content 决定 Tailwind 要去扫描哪些文件。
+  // Tailwind 的工作方式不是“把所有样式都生成出来”，
+  // 而是“只生成你在这些文件里真正写到过的类名”。
+  //
+  // 所以如果你以后新增了某个目录，比如 src/pages，
+  // 但忘了把它加到 content 里，就会出现：
+  // “类名写了，但页面完全没样式”的情况。
   // Tailwind 会扫描这些文件，只有这里真正用到的类名才会被打包。
   // 如果以后你新增目录，但 Tailwind 样式不生效，先检查这里有没有把新目录写进去。
   content: ['./index.html', './src/**/*.{vue,js,ts,jsx,tsx}'],
@@ -8,6 +15,7 @@ export default {
       colors: {
         // 这里扩展了一组项目主色。
         // 以后在模板里可以直接写 bg-brand-500、text-brand-700 这类类名。
+        // 你可以把它理解成：给项目自己取了一套可复用的颜色名字。
         brand: {
           50: '#eefbf7',
           100: '#d5f5ec',
@@ -24,9 +32,12 @@ export default {
       boxShadow: {
         // 这是自定义阴影名字。
         // 页面里写 shadow-panel 时，实际用的就是这段阴影配置。
+        // 自定义名字的好处是：以后多个卡片要统一风格时，只改这里一处就行。
         panel: '0 22px 50px -28px rgba(15, 23, 42, 0.35)'
       }
     }
   },
+  // 目前没有额外插件，所以先保留空数组。
+  // 如果以后你们接入表单插件、排版插件，通常就是在这里加。
   plugins: []
 }
