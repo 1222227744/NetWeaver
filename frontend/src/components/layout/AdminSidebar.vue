@@ -24,6 +24,14 @@ const handleSelect = (menuKey: string) => {
 </script>
 
 <template>
+  <!--
+    aside 标签可以理解成“侧边栏区域”。
+    这个组件当前只负责：
+    1. 展示导航分组
+    2. 高亮当前菜单
+    3. 把点击结果通知给父组件
+    它自己不负责切页面，因为项目当前还没有接 vue-router。
+  -->
   <aside
     class="relative flex h-full w-[17.5rem] flex-col overflow-hidden rounded-[2rem] bg-[linear-gradient(180deg,#0f172a_0%,#111827_45%,#0f3d39_100%)] p-4 text-slate-100"
   >
@@ -63,6 +71,7 @@ const handleSelect = (menuKey: string) => {
             <!--
               v-for 的意思是“循环渲染”。
               group.items 里有几个菜单对象，这里就会生成几个菜单项。
+              :index 可以理解成“这个菜单项的唯一编号”。
             -->
             <el-menu-item v-for="item in group.items" :key="item.index" :index="item.index">
               <el-icon class="text-base">

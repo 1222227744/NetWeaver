@@ -1,24 +1,67 @@
 {
   "compilerOptions": {
+    // 编译目标。
+    // 粗略理解成：TypeScript 要把代码按什么级别的 JavaScript 语法来理解。
     "target": "ES2020",
+
+    // 让 class 字段行为更贴近现代标准。
     "useDefineForClassFields": true,
+
+    // 使用现代 ES 模块。
     "module": "ESNext",
+
+    // 告诉 TypeScript：项目里会用到哪些内置运行环境 API。
+    // DOM 代表浏览器 API，比如 window、document。
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
+
+    // 跳过第三方声明文件的详细检查，加快检查速度。
     "skipLibCheck": true,
+
+    // Bundler 模式更适合 Vite 这类现代打包工具。
     "moduleResolution": "Bundler",
+
+    // 允许导入带扩展名的 ts 文件。
     "allowImportingTsExtensions": true,
+
+    // 允许直接 import JSON 文件。
     "resolveJsonModule": true,
+
+    // 强制每个文件都可以被单独处理，和 Vite 工作方式更兼容。
     "isolatedModules": true,
+
+    // 强制把文件按模块来理解，避免一些旧式脚本行为带来的混乱。
     "moduleDetection": "force",
+
+    // noEmit=true 代表“只做类型检查，不输出编译文件”。
+    // 因为真正的打包输出由 Vite 负责，不由 tsc 负责。
     "noEmit": true,
+
+    // JSX 相关配置，虽然当前项目不用 React，但 Vue 的某些工具链仍会读取它。
     "jsx": "preserve",
+
+    // strict=true 会开启更严格的类型检查。
+    // 对新手来说它会更“烦”，但长期能帮你更早发现问题。
     "strict": true,
+
+    // 不允许声明了却没用的局部变量。
     "noUnusedLocals": true,
+
+    // 不允许声明了却没用的函数参数。
     "noUnusedParameters": true,
+
+    // 路径别名配置。
+    // 这里把 @/* 映射到 ./src/*，
+    // 所以前端代码里写 @/api/dashboard，实际就是 src/api/dashboard。
     "paths": {
       "@/*": ["./src/*"]
     },
+
+    // 明确要加载哪些全局类型定义。
     "types": ["vite/client", "node"]
   },
+
+  // TypeScript 只会检查这里包含进去的文件。
+  // 所以如果以后你新增目录但发现类型检查没有覆盖它，
+  // 也要回来看看 include 有没有把它包含进去。
   "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue", "vite.config.ts"]
 }

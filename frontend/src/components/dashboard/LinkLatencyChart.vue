@@ -2,19 +2,23 @@
 import * as echarts from 'echarts'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import type { DashboardNode } from '@/api/dashboard'
+import type { DashboardMetricPoint, DashboardNode } from '@/api/dashboard'
+
+// 这个组件只负责“悬浮详情卡片 + 折线图显示”。
+// 它不自己向后端发请求。
+//
+// 也就是说：
+// - 谁请求 metrics？父组件请求
+// - 谁决定当前展示哪个节点？父组件和关系图组件一起决定
+// - 这个组件做什么？只负责把传进来的数据画出来
 
 interface HoverPanelPosition {
   left: number
   top: number
 }
 
-interface LatencyHistoryPoint {
-  timeLabel: string
-  latencyMs: number
-}
-
 const props = defineProps<{
+  metrics: DashboardMetricPoint[]
   node: DashboardNode | null
   position: HoverPanelPosition
   visible: boolean
@@ -24,32 +28,22 @@ const chartContainer = ref<HTMLDivElement | null>(null)
 const chartInstance = ref<echarts.ECharts | null>(null)
 
 const hoverCardStyle = computed(() => ({
+  // 因为这个卡片是 fixed 定位，所以 left/top 要自己计算像素位置。
   left: `${props.position.left}px`,
   top: `${props.position.top}px`
 }))
 
-const latencyHistory = computed<LatencyHistoryPoint[]>(() => {
-  if (!props.node) {
-    return []
-  }
-
-  // 这里只保留“画图逻辑”，不请求任何后端接口。
-  // 为了让每个节点的折线图长得不一样，这里根据节点自身字段生成一组稳定的本地演示数据。
-  const baseLatency = props.node.nat_type === 'Symmetric' ? 42 : props.node.nat_type === 'Full Cone' ? 18 : 28
-  const peerFactor = props.node.connected_peers * 2
-  const nodeSeed = props.node.node_id
-    .split('')
-    .reduce((total, currentChar) => total + currentChar.charCodeAt(0), 0)
-
-  return Array.from({ length: 8 }, (_, index) => {
-    const waveOffset = ((nodeSeed + index * 17) % 9) - 4
-    const latencyMs = Math.max(6, baseLatency + peerFactor + waveOffset)
-
-    return {
-      timeLabel: `${index + 1}m`,
-      latencyMs
-    }
-  })
+const latencyHistory = computed(() => {
+  // 后端给的是时间戳，这里把它转换成适合图表 x 轴显示的时间字符串。
+  return props.metrics.map((point) => ({
+    timeLabel: new Date(point.timestamp * 1000).toLocaleTimeString('zh-CN', {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    }),
+    latencyMs: point.latency_ms
+  }))
 })
 
 const chartSummary = computed(() => {
@@ -57,18 +51,42 @@ const chartSummary = computed(() => {
     return '当前没有可展示的节点信息。'
   }
 
-  return `这里先展示节点 ${props.node.hostname} 的本地折线图预览。后续如果后端补充真实链路延迟接口，再把这组演示数据替换成真实采样结果。`
+  if (latencyHistory.value.length === 0) {
+    return `当前节点 ${props.node.hostname} 还没有返回链路监控数据。等后端补充 metrics 数据后，这里会展示真实延迟曲线。`
+  }
+
+  return `这里展示的是节点 ${props.node.hostname} 当前拿到的真实链路延迟采样结果。`
 })
 
 const renderChart = async () => {
   await nextTick()
 
   if (!props.visible || !chartContainer.value) {
+    // 卡片不可见时，不需要继续画图。
     return
   }
 
   if (!chartInstance.value) {
     chartInstance.value = echarts.init(chartContainer.value)
+  }
+
+  if (latencyHistory.value.length === 0) {
+    // 如果后端还没有返回 metrics，不画假数据，直接显示空态。
+    chartInstance.value.clear()
+    chartInstance.value.setOption({
+      title: {
+        text: '暂无链路数据',
+        left: 'center',
+        top: 'middle',
+        textStyle: {
+          color: '#94a3b8',
+          fontSize: 15,
+          fontWeight: 500
+        }
+      }
+    })
+    chartInstance.value.resize()
+    return
   }
 
   chartInstance.value.setOption({
@@ -127,7 +145,9 @@ const renderChart = async () => {
     },
     series: [
       {
-        name: '延迟预览',
+        // 现在这里展示的已经不是“本地预览”，
+        // 而是父组件传进来的真实 metrics 数据。
+        name: '链路延迟',
         type: 'line',
         smooth: true,
         symbol: 'circle',
@@ -155,8 +175,9 @@ const handleResize = () => {
 }
 
 watch(
-  () => [props.visible, props.node?.node_id, latencyHistory.value.length],
+  () => [props.visible, props.node?.node_id, props.metrics.length],
   () => {
+    // 只要可见状态、节点 id、metrics 数量任意一个变化，就重画图。
     void renderChart()
   },
   { deep: true }
@@ -176,6 +197,11 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
+    <!--
+      Teleport 的意思可以简单理解成：
+      “这个组件虽然写在当前层级里，但真正渲染时直接放到 body 下面去”。
+      这样能避免被页面里别的盒子遮住。
+    -->
     <div
       v-show="props.visible && props.node"
       class="pointer-events-none fixed z-[200] w-[360px] rounded-[1.5rem] border border-slate-200 bg-white/95 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.18)] backdrop-blur"
@@ -216,6 +242,10 @@ onBeforeUnmount(() => {
         <p class="text-sm leading-6 text-slate-600">{{ chartSummary }}</p>
       </div>
 
+      <!--
+        真正的折线图就画在这个容器里。
+        renderChart() 里会拿到这个 DOM，然后交给 ECharts 初始化。
+      -->
       <div ref="chartContainer" class="mt-4 h-[180px] rounded-[1.25rem] border border-slate-200 bg-white" />
     </div>
   </Teleport>

@@ -1,6 +1,10 @@
 <!doctype html>
 <html lang="zh-CN">
   <head>
+    <!--
+      这是前端项目真正被浏览器打开时的第一份文件。
+      它本身几乎不放业务内容，只负责提供一个“起点”。
+    -->
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NetWeaver Admin</title>
@@ -8,14 +12,17 @@
   <body>
     <!--
       这里先只放一个空的根节点。
-      Vue 启动后，会把整个后台页面“挂载”到这个 div 里面。
-      你可以把它理解成：先留一块空白画布，后面交给 Vue 往里渲染页面。
+      可以把它想成“给 Vue 准备的一块空白画布”。
+      真正的后台页面，不是写死在 html 里的，
+      而是等 Vue 启动后，再统一渲染到这个 div 里面。
     -->
     <div id="app"></div>
 
     <!--
       浏览器会从这里开始加载前端入口文件。
       src/main.ts 会继续把 App.vue、样式、Element Plus 等内容都串起来。
+      所以前端的启动顺序就是：
+      index.html -> src/main.ts -> App.vue -> 具体页面组件
     -->
     <script type="module" src="/src/main.ts"></script>
   </body>
