@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"netweaver-backend/pkg/config"
 	"netweaver-backend/pkg/protocol"
@@ -27,7 +26,7 @@ func New(baseURL string) *Client {
 	return &Client{
 		BaseURL: strings.TrimRight(baseURL, "/"),
 		HTTPClient: &http.Client{
-			Timeout: 5 * time.Second,
+			Timeout: config.DefaultRequestTimeout,
 		},
 	}
 }
@@ -45,6 +44,9 @@ func (c *Client) RegisterNode(ctx context.Context, req protocol.RegisterNodeRequ
 	if err := c.postJSON(ctx, "/api/v1/nodes/register", req, &result); err != nil {
 		return protocol.RegisterNodeResponse{}, err
 	}
+	if err := ensureAPIResponse(result.Code, result.Msg); err != nil {
+		return protocol.RegisterNodeResponse{}, err
+	}
 	return result.Data, nil
 }
 
@@ -52,6 +54,9 @@ func (c *Client) Heartbeat(ctx context.Context, nodeID string, req protocol.Hear
 	var result protocol.APIResponse[protocol.HeartbeatResponse]
 	path := "/api/v1/nodes/" + url.PathEscape(nodeID) + "/heartbeat"
 	if err := c.postJSON(ctx, path, req, &result); err != nil {
+		return protocol.HeartbeatResponse{}, err
+	}
+	if err := ensureAPIResponse(result.Code, result.Msg); err != nil {
 		return protocol.HeartbeatResponse{}, err
 	}
 	return result.Data, nil
@@ -62,6 +67,24 @@ func (c *Client) GetPeers(ctx context.Context, nodeID string) (protocol.PeersRes
 	path := "/api/v1/nodes/" + url.PathEscape(nodeID) + "/peers"
 	if err := c.getJSON(ctx, path, &result); err != nil {
 		return protocol.PeersResponse{}, err
+	}
+	if err := ensureAPIResponse(result.Code, result.Msg); err != nil {
+		return protocol.PeersResponse{}, err
+	}
+	return result.Data, nil
+}
+
+func (c *Client) GetNodeMetrics(ctx context.Context, nodeID string, limit int) (protocol.NodeMetricsResponse, error) {
+	var result protocol.APIResponse[protocol.NodeMetricsResponse]
+	path := "/api/v1/nodes/" + url.PathEscape(nodeID) + "/metrics"
+	if limit > 0 {
+		path += fmt.Sprintf("?limit=%d", limit)
+	}
+	if err := c.getJSON(ctx, path, &result); err != nil {
+		return protocol.NodeMetricsResponse{}, err
+	}
+	if err := ensureAPIResponse(result.Code, result.Msg); err != nil {
+		return protocol.NodeMetricsResponse{}, err
 	}
 	return result.Data, nil
 }
@@ -101,4 +124,14 @@ func (c *Client) doJSON(req *http.Request, out any) error {
 	}
 
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+func ensureAPIResponse(code int, msg string) error {
+	if code == protocol.CodeSuccess {
+		return nil
+	}
+	if msg == "" {
+		msg = "controller returned an unsuccessful API response"
+	}
+	return fmt.Errorf("%s (code %d)", msg, code)
 }

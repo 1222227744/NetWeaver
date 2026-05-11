@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"netweaver-backend/internal/node/p2p"
+	noderuntime "netweaver-backend/internal/node/runtime"
 	"netweaver-backend/internal/node/tun"
 )
 
@@ -28,6 +29,10 @@ func main() {
 	}
 
 	switch args[0] {
+	case "run":
+		if err := runAgent(args[1:]); err != nil {
+			log.Fatal(err)
+		}
 	case "p2p":
 		if err := runP2P(args[1:]); err != nil {
 			log.Fatal(err)
@@ -36,6 +41,13 @@ func main() {
 		printUsage()
 		os.Exit(2)
 	}
+}
+
+func runAgent(args []string) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	return noderuntime.Run(ctx, args)
 }
 
 func runP2P(args []string) error {
@@ -80,6 +92,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  go run ./cmd/node [tun flags]")
 	fmt.Fprintln(os.Stderr, "  go run ./cmd/node tun [tun flags]")
+	fmt.Fprintln(os.Stderr, "  go run ./cmd/node run -controller http://127.0.0.1:8080")
 	fmt.Fprintln(os.Stderr, "  go run ./cmd/node p2p -profile A")
 	fmt.Fprintln(os.Stderr, "  go run ./cmd/node p2p -profile B")
 }

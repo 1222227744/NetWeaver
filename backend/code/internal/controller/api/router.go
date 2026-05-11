@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -30,6 +32,7 @@ func NewRouter(registry *state.Registry) *gin.Engine {
 		{
 			dashboard.GET("/stats", server.GetDashboardStats)
 			dashboard.GET("/nodes", server.GetDashboardNodes)
+			dashboard.GET("/edges", server.GetDashboardEdges)
 		}
 
 		nodes := v1.Group("/nodes")
@@ -37,6 +40,7 @@ func NewRouter(registry *state.Registry) *gin.Engine {
 			nodes.POST("/register", server.RegisterNode)
 			nodes.POST("/:node_id/heartbeat", server.Heartbeat)
 			nodes.GET("/:node_id/peers", server.GetPeers)
+			nodes.GET("/:node_id/metrics", server.GetNodeMetrics)
 		}
 	}
 
@@ -58,8 +62,14 @@ func (s *Server) GetDashboardStats(c *gin.Context) {
 }
 
 func (s *Server) GetDashboardNodes(c *gin.Context) {
-	respondOK(c, protocol.DashboardNodesResponse{
+	respondOK(c, protocol.DashboardNodesData{
 		Nodes: s.registry.DashboardNodes(),
+	})
+}
+
+func (s *Server) GetDashboardEdges(c *gin.Context) {
+	respondOK(c, protocol.DashboardEdgesData{
+		Edges: s.registry.DashboardEdges(),
 	})
 }
 
@@ -67,6 +77,10 @@ func (s *Server) RegisterNode(c *gin.Context) {
 	var req protocol.RegisterNodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if strings.TrimSpace(req.MachineID) == "" || strings.TrimSpace(req.Hostname) == "" || strings.TrimSpace(req.OS) == "" || strings.TrimSpace(req.LocalIP) == "" {
+		respondError(c, http.StatusBadRequest, "machine_id, hostname, os and local_ip are required")
 		return
 	}
 
@@ -92,7 +106,7 @@ func (s *Server) Heartbeat(c *gin.Context) {
 		return
 	}
 
-	_, onlinePeerCount, ok := s.registry.Heartbeat(nodeID, req)
+	_, onlinePeerCount, ok := s.registry.Heartbeat(nodeID, req, c.ClientIP())
 	if !ok {
 		respondError(c, http.StatusNotFound, "node not found")
 		return
@@ -105,6 +119,7 @@ func (s *Server) Heartbeat(c *gin.Context) {
 
 	respondOK(c, protocol.HeartbeatResponse{
 		ActionRequired: action,
+		ConnectedPeers: onlinePeerCount,
 	})
 }
 
@@ -126,8 +141,34 @@ func (s *Server) GetPeers(c *gin.Context) {
 	})
 }
 
-func respondOK(c *gin.Context, data any) {
-	c.JSON(http.StatusOK, protocol.APIResponse[any]{
+func (s *Server) GetNodeMetrics(c *gin.Context) {
+	nodeID := c.Param("node_id")
+	if nodeID == "" {
+		respondError(c, http.StatusBadRequest, "node_id is required")
+		return
+	}
+
+	limit := 60
+	if rawLimit := c.Query("limit"); rawLimit != "" {
+		parsedLimit, err := strconv.Atoi(rawLimit)
+		if err != nil || parsedLimit < 0 {
+			respondError(c, http.StatusBadRequest, "limit must be a non-negative integer")
+			return
+		}
+		limit = parsedLimit
+	}
+
+	metrics, ok := s.registry.NodeMetrics(nodeID, limit)
+	if !ok {
+		respondError(c, http.StatusNotFound, "node not found")
+		return
+	}
+
+	respondOK(c, metrics)
+}
+
+func respondOK[T any](c *gin.Context, data T) {
+	c.JSON(http.StatusOK, protocol.APIResponse[T]{
 		Code: protocol.CodeSuccess,
 		Msg:  protocol.MsgSuccess,
 		Data: data,
