@@ -54,37 +54,23 @@ type HeartbeatRequest struct {
 
 type HeartbeatResponse struct {
 	ActionRequired string `json:"action_required"`
-	ConnectedPeers int    `json:"connected_peers"`
 }
 
 type DashboardStatsData struct {
-	TotalNodes          int       `json:"total_nodes"`
-	OnlineNodes         int       `json:"online_nodes"`
-	OfflineNodes        int       `json:"offline_nodes"`
-	TotalEdges          int       `json:"total_edges"`
-	TotalRXBytes        uint64    `json:"total_rx_bytes"`
-	TotalTXBytes        uint64    `json:"total_tx_bytes"`
-	TotalTrafficBytes   uint64    `json:"total_traffic_bytes"`
-	TotalTrafficGB      float64   `json:"total_traffic_gb"`
-	ControllerUptimeSec int64     `json:"controller_uptime_sec"`
-	LastUpdatedAt       time.Time `json:"last_updated_at"`
+	TotalNodes          int     `json:"total_nodes"`
+	OnlineNodes         int     `json:"online_nodes"`
+	TotalTrafficGB      float64 `json:"total_traffic_gb"`
+	ControllerUptimeSec int64   `json:"controller_uptime_sec"`
 }
 
 type DashboardNode struct {
-	NodeID         string    `json:"node_id"`
-	MachineID      string    `json:"machine_id"`
-	Hostname       string    `json:"hostname"`
-	OS             string    `json:"os"`
-	LocalIP        string    `json:"local_ip"`
-	VirtualIP      string    `json:"virtual_ip"`
-	PublicIP       string    `json:"public_ip"`
-	PublicPort     int       `json:"public_port"`
-	NATType        string    `json:"nat_type"`
-	Status         string    `json:"status"`
-	ConnectedPeers int       `json:"connected_peers"`
-	CurrentRXBytes uint64    `json:"current_rx_bytes"`
-	CurrentTXBytes uint64    `json:"current_tx_bytes"`
-	LastSeen       time.Time `json:"last_seen"`
+	NodeID         string `json:"node_id"`
+	Hostname       string `json:"hostname"`
+	VirtualIP      string `json:"virtual_ip"`
+	PublicIP       string `json:"public_ip"`
+	NATType        string `json:"nat_type"`
+	Status         string `json:"status"`
+	ConnectedPeers int    `json:"connected_peers"`
 }
 
 type DashboardNodesData struct {
@@ -92,18 +78,9 @@ type DashboardNodesData struct {
 }
 
 type DashboardEdge struct {
-	EdgeID          string    `json:"edge_id"`
-	SourceNodeID    string    `json:"source_node_id"`
-	TargetNodeID    string    `json:"target_node_id"`
-	SourceHostname  string    `json:"source_hostname"`
-	TargetHostname  string    `json:"target_hostname"`
-	SourceVirtualIP string    `json:"source_virtual_ip"`
-	TargetVirtualIP string    `json:"target_virtual_ip"`
-	SourcePublicIP  string    `json:"source_public_ip"`
-	TargetPublicIP  string    `json:"target_public_ip"`
-	RecommendMode   string    `json:"recommend_mode"`
-	Status          string    `json:"status"`
-	LastSeen        time.Time `json:"last_seen"`
+	Source string `json:"source"`
+	Target string `json:"target"`
+	Type   string `json:"type"`
 }
 
 type DashboardEdgesData struct {
@@ -111,8 +88,6 @@ type DashboardEdgesData struct {
 }
 
 type PeerInfo struct {
-	TargetNodeID     string `json:"target_node_id"`
-	TargetHostname   string `json:"target_hostname"`
 	TargetVirtualIP  string `json:"target_virtual_ip"`
 	TargetPublicIP   string `json:"target_public_ip"`
 	TargetPublicPort int    `json:"target_public_port"`
@@ -135,6 +110,15 @@ type NodeMetricPoint struct {
 type NodeMetricsResponse struct {
 	NodeID string            `json:"node_id"`
 	Points []NodeMetricPoint `json:"points"`
+}
+
+type LinkMetricPoint struct {
+	Timestamp int64   `json:"timestamp"`
+	LatencyMS float64 `json:"latency_ms"`
+}
+
+type LinkMetricsResponse struct {
+	Metrics []LinkMetricPoint `json:"metrics"`
 }
 
 type NodeInfo struct {

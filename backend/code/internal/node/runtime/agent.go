@@ -179,7 +179,7 @@ func (a *Agent) sendHeartbeat(ctx context.Context) error {
 		return err
 	}
 
-	log.Printf("heartbeat ok: node_id=%s peers=%d action=%s rx=%d tx=%d", a.nodeID, resp.ConnectedPeers, resp.ActionRequired, rxBytes, txBytes)
+	log.Printf("heartbeat ok: node_id=%s action=%s rx=%d tx=%d", a.nodeID, resp.ActionRequired, rxBytes, txBytes)
 	if resp.ActionRequired == protocol.ActionSyncPeers {
 		a.syncPeers(ctx)
 	}
@@ -208,7 +208,7 @@ func (a *Agent) syncPeers(ctx context.Context) {
 
 	summary := make([]string, 0, len(peers.Peers))
 	for _, peer := range peers.Peers {
-		summary = append(summary, fmt.Sprintf("%s(%s,%s)", peer.TargetHostname, peer.TargetVirtualIP, peer.RecommendMode))
+		summary = append(summary, fmt.Sprintf("%s(%s)", peer.TargetVirtualIP, peer.RecommendMode))
 	}
 	log.Printf("peers synced: %s", strings.Join(summary, ", "))
 }

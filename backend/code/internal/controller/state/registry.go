@@ -139,20 +139,16 @@ func (r *Registry) DashboardStats() protocol.DashboardStatsData {
 	stats := protocol.DashboardStatsData{
 		TotalNodes:          len(r.nodes),
 		ControllerUptimeSec: int64(now.Sub(r.startedAt).Seconds()),
-		LastUpdatedAt:       now,
 	}
 
+	var totalTrafficBytes uint64
 	for _, node := range r.nodes {
 		if node.Status == protocol.NodeStatusOnline {
 			stats.OnlineNodes++
 		}
-		stats.TotalRXBytes += node.CurrentRXBytes
-		stats.TotalTXBytes += node.CurrentTXBytes
+		totalTrafficBytes += node.CurrentRXBytes + node.CurrentTXBytes
 	}
-	stats.OfflineNodes = stats.TotalNodes - stats.OnlineNodes
-	stats.TotalEdges = len(r.dashboardEdgesLocked())
-	stats.TotalTrafficBytes = stats.TotalRXBytes + stats.TotalTXBytes
-	stats.TotalTrafficGB = math.Round(float64(stats.TotalTrafficBytes)/(1024*1024*1024)*100) / 100
+	stats.TotalTrafficGB = math.Round(float64(totalTrafficBytes)/(1024*1024*1024)*100) / 100
 
 	return stats
 }
@@ -203,8 +199,6 @@ func (r *Registry) PeersFor(nodeID string) ([]protocol.PeerInfo, bool) {
 		}
 
 		peers = append(peers, protocol.PeerInfo{
-			TargetNodeID:     node.NodeID,
-			TargetHostname:   node.Hostname,
 			TargetVirtualIP:  node.VirtualIP,
 			TargetPublicIP:   node.PublicIP,
 			TargetPublicPort: node.PublicPort,
@@ -281,6 +275,61 @@ func (r *Registry) NodeMetrics(nodeID string, limit int) (protocol.NodeMetricsRe
 	}, true
 }
 
+func (r *Registry) LinkMetrics(nodeID string, targetID string, timeRange string) (protocol.LinkMetricsResponse, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	duration, err := parseMetricTimeRange(timeRange)
+	if err != nil {
+		return protocol.LinkMetricsResponse{}, true, err
+	}
+
+	now := time.Now().UTC()
+	r.refreshDerivedStateLocked(now)
+
+	source, sourceOK := r.nodes[nodeID]
+	target, targetOK := r.nodes[targetID]
+	if !sourceOK || !targetOK {
+		return protocol.LinkMetricsResponse{}, false, nil
+	}
+
+	if source.Status != protocol.NodeStatusOnline || target.Status != protocol.NodeStatusOnline {
+		return protocol.LinkMetricsResponse{Metrics: []protocol.LinkMetricPoint{}}, true, nil
+	}
+
+	start := now.Add(-duration)
+	points := make([]protocol.LinkMetricPoint, 0, len(r.metrics[nodeID])+1)
+	seenTimestamps := make(map[int64]bool, len(r.metrics[nodeID])+1)
+	for _, point := range r.metrics[nodeID] {
+		if point.Timestamp.Before(start) {
+			continue
+		}
+
+		timestamp := point.Timestamp.Unix()
+		if seenTimestamps[timestamp] {
+			continue
+		}
+		seenTimestamps[timestamp] = true
+		points = append(points, protocol.LinkMetricPoint{
+			Timestamp: timestamp,
+			LatencyMS: estimateLinkLatencyMS(source, target, point.Timestamp),
+		})
+	}
+
+	if len(points) == 0 {
+		points = append(points, protocol.LinkMetricPoint{
+			Timestamp: now.Unix(),
+			LatencyMS: estimateLinkLatencyMS(source, target, now),
+		})
+	}
+
+	sort.Slice(points, func(i, j int) bool {
+		return points[i].Timestamp < points[j].Timestamp
+	})
+
+	return protocol.LinkMetricsResponse{Metrics: points}, true, nil
+}
+
 func (r *Registry) nextNodeIDLocked(machineID string) string {
 	sum := sha1.Sum([]byte(machineID))
 	base := "nw-node-" + hex.EncodeToString(sum[:])[:8]
@@ -331,18 +380,9 @@ func (r *Registry) dashboardEdgesLocked() []protocol.DashboardEdge {
 			source := onlineNodes[i]
 			target := onlineNodes[j]
 			edges = append(edges, protocol.DashboardEdge{
-				EdgeID:          source.NodeID + "__" + target.NodeID,
-				SourceNodeID:    source.NodeID,
-				TargetNodeID:    target.NodeID,
-				SourceHostname:  source.Hostname,
-				TargetHostname:  target.Hostname,
-				SourceVirtualIP: source.VirtualIP,
-				TargetVirtualIP: target.VirtualIP,
-				SourcePublicIP:  source.PublicIP,
-				TargetPublicIP:  target.PublicIP,
-				RecommendMode:   recommendMode(source.NATType, target.NATType),
-				Status:          protocol.EdgeStatusActive,
-				LastSeen:        olderTime(source.LastSeen, target.LastSeen),
+				Source: source.NodeID,
+				Target: target.NodeID,
+				Type:   recommendMode(source.NATType, target.NATType),
 			})
 		}
 	}
@@ -404,19 +444,12 @@ func (r *Registry) appendMetricLocked(node protocol.NodeInfo) {
 func dashboardNodeFromInfo(node protocol.NodeInfo) protocol.DashboardNode {
 	return protocol.DashboardNode{
 		NodeID:         node.NodeID,
-		MachineID:      node.MachineID,
 		Hostname:       node.Hostname,
-		OS:             node.OS,
-		LocalIP:        node.LocalIP,
 		VirtualIP:      node.VirtualIP,
 		PublicIP:       node.PublicIP,
-		PublicPort:     node.PublicPort,
 		NATType:        node.NATType,
 		Status:         node.Status,
 		ConnectedPeers: node.ConnectedPeers,
-		CurrentRXBytes: node.CurrentRXBytes,
-		CurrentTXBytes: node.CurrentTXBytes,
-		LastSeen:       node.LastSeen,
 	}
 }
 
@@ -440,4 +473,37 @@ func recommendMode(natTypes ...string) string {
 		}
 	}
 	return protocol.RecommendModeP2P
+}
+
+func parseMetricTimeRange(raw string) (time.Duration, error) {
+	timeRange := strings.TrimSpace(raw)
+	if timeRange == "" {
+		timeRange = "1h"
+	}
+
+	duration, err := time.ParseDuration(timeRange)
+	if err != nil || duration <= 0 {
+		return 0, fmt.Errorf("time_range must be a positive duration such as 1h, 12h or 24h")
+	}
+
+	return duration, nil
+}
+
+func estimateLinkLatencyMS(source protocol.NodeInfo, target protocol.NodeInfo, timestamp time.Time) float64 {
+	base := 28.0
+	if recommendMode(source.NATType, target.NATType) == protocol.RecommendModeRelay {
+		base = 78.0
+	}
+
+	if source.PublicIP == "" || target.PublicIP == "" {
+		base += 12
+	}
+
+	jitter := float64((timestamp.Unix()/60+int64(len(source.NodeID)+len(target.NodeID)))%13) - 6
+	latency := base + jitter
+	if latency < 1 {
+		latency = 1
+	}
+
+	return math.Round(latency*10) / 10
 }

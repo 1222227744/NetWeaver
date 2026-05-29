@@ -32,6 +32,7 @@ func NewRouter(registry *state.Registry) *gin.Engine {
 		{
 			dashboard.GET("/stats", server.GetDashboardStats)
 			dashboard.GET("/nodes", server.GetDashboardNodes)
+			dashboard.GET("/nodes/:node_id/metrics", server.GetDashboardNodeMetrics)
 			dashboard.GET("/edges", server.GetDashboardEdges)
 		}
 
@@ -119,7 +120,6 @@ func (s *Server) Heartbeat(c *gin.Context) {
 
 	respondOK(c, protocol.HeartbeatResponse{
 		ActionRequired: action,
-		ConnectedPeers: onlinePeerCount,
 	})
 }
 
@@ -161,6 +161,33 @@ func (s *Server) GetNodeMetrics(c *gin.Context) {
 	metrics, ok := s.registry.NodeMetrics(nodeID, limit)
 	if !ok {
 		respondError(c, http.StatusNotFound, "node not found")
+		return
+	}
+
+	respondOK(c, metrics)
+}
+
+func (s *Server) GetDashboardNodeMetrics(c *gin.Context) {
+	nodeID := c.Param("node_id")
+	if nodeID == "" {
+		respondError(c, http.StatusBadRequest, "node_id is required")
+		return
+	}
+
+	targetID := strings.TrimSpace(c.Query("target_id"))
+	if targetID == "" {
+		respondError(c, http.StatusBadRequest, "target_id is required")
+		return
+	}
+
+	timeRange := strings.TrimSpace(c.DefaultQuery("time_range", "1h"))
+	metrics, ok, err := s.registry.LinkMetrics(nodeID, targetID, timeRange)
+	if err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !ok {
+		respondError(c, http.StatusNotFound, "node or target node not found")
 		return
 	}
 
