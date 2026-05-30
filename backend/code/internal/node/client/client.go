@@ -74,12 +74,16 @@ func (c *Client) GetPeers(ctx context.Context, nodeID string) (protocol.PeersRes
 	return result.Data, nil
 }
 
-func (c *Client) GetNodeMetrics(ctx context.Context, nodeID string, limit int) (protocol.NodeMetricsResponse, error) {
+func (c *Client) GetNodeMetrics(ctx context.Context, nodeID string, targetID string, timeRange string) (protocol.NodeMetricsResponse, error) {
 	var result protocol.APIResponse[protocol.NodeMetricsResponse]
-	path := "/api/v1/nodes/" + url.PathEscape(nodeID) + "/metrics"
-	if limit > 0 {
-		path += fmt.Sprintf("?limit=%d", limit)
+	if timeRange == "" {
+		timeRange = "1h"
 	}
+
+	query := url.Values{}
+	query.Set("target_id", targetID)
+	query.Set("time_range", timeRange)
+	path := "/api/v1/dashboard/nodes/" + url.PathEscape(nodeID) + "/metrics?" + query.Encode()
 	if err := c.getJSON(ctx, path, &result); err != nil {
 		return protocol.NodeMetricsResponse{}, err
 	}
