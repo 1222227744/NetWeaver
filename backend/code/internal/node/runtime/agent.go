@@ -30,6 +30,7 @@ type Config struct {
 	PublicPort        int
 	STUNServers       []string
 	DataListenAddr    string
+	PSK               string
 	HeartbeatInterval time.Duration
 	PeerInterval      time.Duration
 }
@@ -54,6 +55,7 @@ func Run(ctx context.Context, args []string) error {
 	publicPort := fs.Int("public-port", 0, "public port reported in heartbeat")
 	stunServers := fs.String("stun-servers", config.DefaultSTUNServers, "comma-separated STUN endpoints")
 	dataListenAddr := fs.String("data-addr", "0.0.0.0:0", "UDP address used for STUN, P2P punch and data plane")
+	psk := fs.String("psk", config.NodePSK(), "node pre-shared key for controller node APIs")
 	heartbeatInterval := fs.Duration("interval", config.DefaultHeartbeatInterval, "heartbeat interval")
 	peerInterval := fs.Duration("peer-interval", config.DefaultHeartbeatInterval, "peer sync interval")
 	if err := fs.Parse(args); err != nil {
@@ -92,6 +94,7 @@ func Run(ctx context.Context, args []string) error {
 		PublicPort:        *publicPort,
 		STUNServers:       splitCSV(*stunServers),
 		DataListenAddr:    strings.TrimSpace(*dataListenAddr),
+		PSK:               strings.TrimSpace(*psk),
 		HeartbeatInterval: *heartbeatInterval,
 		PeerInterval:      *peerInterval,
 	})
@@ -115,10 +118,13 @@ func New(cfg Config) *Agent {
 	if cfg.DataListenAddr == "" {
 		cfg.DataListenAddr = "0.0.0.0:0"
 	}
+	if cfg.PSK == "" {
+		cfg.PSK = config.NodePSK()
+	}
 
 	agent := &Agent{
 		cfg:    cfg,
-		client: client.New(cfg.ControllerURL),
+		client: client.NewWithPSK(cfg.ControllerURL, cfg.PSK),
 	}
 	agent.linker = newLinkManager(agent)
 	return agent
@@ -143,6 +149,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	} else {
 		a.detectNAT(ctx)
 		go a.linker.readLoop(ctx, a.dataConn)
+		go a.linker.probeLoop(ctx)
 	}
 
 	if err := a.sendHeartbeat(ctx); err != nil {

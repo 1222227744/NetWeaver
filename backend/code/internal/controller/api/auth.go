@@ -5,16 +5,16 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"os"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"netweaver-backend/pkg/config"
 )
 
 const (
 	dashboardTokenTTLSeconds = int64(86400)
-	defaultDashboardUsername = "admin"
-	defaultDashboardPassword = "change-me"
-	defaultJWTSecret         = "netweaver-dashboard-dev-secret"
 )
 
 type jwtHeader struct {
@@ -30,7 +30,7 @@ type jwtClaims struct {
 }
 
 func validDashboardCredential(username string, password string) bool {
-	return username == dashboardUsername() && password == dashboardPassword()
+	return username == config.DashboardUsername() && password == config.DashboardPassword()
 }
 
 func issueDashboardToken(username string, now time.Time) (string, int64, error) {
@@ -56,11 +56,94 @@ func issueDashboardToken(username string, now time.Time) (string, int64, error) 
 	}
 
 	signingInput := encodedHeader + "." + encodedClaims
-	mac := hmac.New(sha256.New, []byte(jwtSecret()))
-	_, _ = mac.Write([]byte(signingInput))
-	signature := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	signature := signJWT(signingInput)
 
 	return signingInput + "." + signature, expiresAt, nil
+}
+
+func requireDashboardJWT() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token, ok := bearerToken(c.GetHeader("Authorization"))
+		if !ok || !validDashboardToken(token, time.Now().UTC()) {
+			respondError(c, 401, "unauthorized: invalid or expired token")
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+
+func requireNodePSK() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token, ok := bearerToken(c.GetHeader("Authorization"))
+		if !ok || !validNodePSK(token) {
+			respondError(c, 401, "unauthorized: invalid or missing PSK")
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+
+func validDashboardToken(token string, now time.Time) bool {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return false
+	}
+
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return false
+	}
+	expectedSignature, err := base64.RawURLEncoding.DecodeString(signJWT(parts[0] + "." + parts[1]))
+	if err != nil || !hmac.Equal(signature, expectedSignature) {
+		return false
+	}
+
+	var header jwtHeader
+	if err := decodeJWTPart(parts[0], &header); err != nil {
+		return false
+	}
+	if header.Algorithm != "HS256" || header.Type != "JWT" {
+		return false
+	}
+
+	var claims jwtClaims
+	if err := decodeJWTPart(parts[1], &claims); err != nil {
+		return false
+	}
+	if claims.Issuer != "netweaver-controller" || strings.TrimSpace(claims.Subject) == "" {
+		return false
+	}
+	if claims.ExpiresAt <= now.Unix() {
+		return false
+	}
+	if claims.IssuedAt > now.Add(5*time.Minute).Unix() {
+		return false
+	}
+
+	return true
+}
+
+func validNodePSK(token string) bool {
+	expected := config.NodePSK()
+	return hmac.Equal([]byte(token), []byte(expected))
+}
+
+func bearerToken(header string) (string, bool) {
+	parts := strings.Fields(strings.TrimSpace(header))
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || parts[1] == "" {
+		return "", false
+	}
+	return parts[1], true
+}
+
+func signJWT(signingInput string) string {
+	mac := hmac.New(sha256.New, []byte(config.JWTSecret()))
+	_, _ = mac.Write([]byte(signingInput))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
 func encodeJWTPart(value any) (string, error) {
@@ -71,21 +154,10 @@ func encodeJWTPart(value any) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(data), nil
 }
 
-func dashboardUsername() string {
-	return envOrDefault("NETWEAVER_DASHBOARD_USERNAME", defaultDashboardUsername)
-}
-
-func dashboardPassword() string {
-	return envOrDefault("NETWEAVER_DASHBOARD_PASSWORD", defaultDashboardPassword)
-}
-
-func jwtSecret() string {
-	return envOrDefault("NETWEAVER_JWT_SECRET", defaultJWTSecret)
-}
-
-func envOrDefault(key string, fallback string) string {
-	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-		return value
+func decodeJWTPart(value string, out any) error {
+	data, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return err
 	}
-	return fallback
+	return json.Unmarshal(data, out)
 }

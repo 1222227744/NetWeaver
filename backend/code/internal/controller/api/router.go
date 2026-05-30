@@ -33,7 +33,7 @@ func NewRouter(registry *state.Registry) *gin.Engine {
 			auth.POST("/login", server.Login)
 		}
 
-		dashboard := v1.Group("/dashboard")
+		dashboard := v1.Group("/dashboard", requireDashboardJWT())
 		{
 			dashboard.GET("/stats", server.GetDashboardStats)
 			dashboard.GET("/nodes", server.GetDashboardNodes)
@@ -41,7 +41,7 @@ func NewRouter(registry *state.Registry) *gin.Engine {
 			dashboard.GET("/nodes/:node_id/metrics", server.GetDashboardNodeMetrics)
 		}
 
-		nodes := v1.Group("/nodes")
+		nodes := v1.Group("/nodes", requireNodePSK())
 		{
 			nodes.POST("/register", server.RegisterNode)
 			nodes.POST("/:node_id/heartbeat", server.Heartbeat)
