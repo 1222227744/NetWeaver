@@ -28,6 +28,11 @@ func NewRouter(registry *state.Registry) *gin.Engine {
 
 	v1 := r.Group("/api/v1")
 	{
+		auth := v1.Group("/auth")
+		{
+			auth.POST("/login", server.Login)
+		}
+
 		dashboard := v1.Group("/dashboard")
 		{
 			dashboard.GET("/stats", server.GetDashboardStats)
@@ -55,6 +60,38 @@ func (s *Server) Ping(c *gin.Context) {
 func (s *Server) ListNodes(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"nodes": s.registry.List(),
+	})
+}
+
+func (s *Server) Login(c *gin.Context) {
+	var req protocol.AuthLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	username := strings.TrimSpace(req.Username)
+	password := strings.TrimSpace(req.Password)
+	if username == "" || password == "" {
+		respondError(c, http.StatusBadRequest, "username and password are required")
+		return
+	}
+	if !validDashboardCredential(username, password) {
+		respondError(c, http.StatusUnauthorized, "unauthorized: invalid username or password")
+		return
+	}
+
+	token, expiresAt, err := issueDashboardToken(username, time.Now().UTC())
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to issue token")
+		return
+	}
+
+	respondOK(c, protocol.AuthLoginResponse{
+		Token:     token,
+		TokenType: "Bearer",
+		ExpiresIn: dashboardTokenTTLSeconds,
+		ExpiresAt: expiresAt,
 	})
 }
 

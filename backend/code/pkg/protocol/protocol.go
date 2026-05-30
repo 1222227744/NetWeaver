@@ -29,6 +29,18 @@ type PingResponse struct {
 	Msg string `json:"msg"`
 }
 
+type AuthLoginRequest struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+type AuthLoginResponse struct {
+	Token     string `json:"token"`
+	TokenType string `json:"token_type"`
+	ExpiresIn int64  `json:"expires_in"`
+	ExpiresAt int64  `json:"expires_at"`
+}
+
 type RegisterNodeRequest struct {
 	MachineID string `json:"machine_id" binding:"required"`
 	Hostname  string `json:"hostname" binding:"required"`
