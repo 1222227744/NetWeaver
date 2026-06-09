@@ -16,6 +16,7 @@ import (
 type Client struct {
 	BaseURL    string
 	HTTPClient *http.Client
+	PSK        string
 }
 
 func New(baseURL string) *Client {
@@ -28,7 +29,14 @@ func New(baseURL string) *Client {
 		HTTPClient: &http.Client{
 			Timeout: config.DefaultRequestTimeout,
 		},
+		PSK: config.NodePSK(),
 	}
+}
+
+func NewWithPSK(baseURL string, psk string) *Client {
+	client := New(baseURL)
+	client.PSK = strings.TrimSpace(psk)
+	return client
 }
 
 func (c *Client) Ping(ctx context.Context) (protocol.PingResponse, error) {
@@ -74,12 +82,16 @@ func (c *Client) GetPeers(ctx context.Context, nodeID string) (protocol.PeersRes
 	return result.Data, nil
 }
 
-func (c *Client) GetNodeMetrics(ctx context.Context, nodeID string, limit int) (protocol.NodeMetricsResponse, error) {
+func (c *Client) GetNodeMetrics(ctx context.Context, nodeID string, targetID string, timeRange string) (protocol.NodeMetricsResponse, error) {
 	var result protocol.APIResponse[protocol.NodeMetricsResponse]
-	path := "/api/v1/nodes/" + url.PathEscape(nodeID) + "/metrics"
-	if limit > 0 {
-		path += fmt.Sprintf("?limit=%d", limit)
+	if timeRange == "" {
+		timeRange = "1h"
 	}
+
+	query := url.Values{}
+	query.Set("target_id", targetID)
+	query.Set("time_range", timeRange)
+	path := "/api/v1/nodes/" + url.PathEscape(nodeID) + "/metrics?" + query.Encode()
 	if err := c.getJSON(ctx, path, &result); err != nil {
 		return protocol.NodeMetricsResponse{}, err
 	}
@@ -113,6 +125,10 @@ func (c *Client) postJSON(ctx context.Context, path string, in any, out any) err
 }
 
 func (c *Client) doJSON(req *http.Request, out any) error {
+	if c.PSK != "" && strings.HasPrefix(req.URL.Path, "/api/v1/nodes") {
+		req.Header.Set("Authorization", "Bearer "+c.PSK)
+	}
+
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return err

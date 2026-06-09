@@ -18,8 +18,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/songgao/water"
-
 	"netweaver-backend/pkg/config"
 )
 
@@ -46,53 +44,17 @@ func Run(args []string) error {
 		return fmt.Errorf("invalid -buf: %d", bufSize)
 	}
 
-	params := water.PlatformSpecificParams{
-		Name: ifName,
-	}
-	if bootstrap {
-		targetUID, targetGID := defaultTargetOwnerGroup()
-		if ownerID >= 0 {
-			targetUID = ownerID
-		}
-		if groupID >= 0 {
-			targetGID = groupID
-		}
-
-		params.Persist = true
-		params.Permissions = &water.DevicePermissions{
-			Owner: uint(targetUID),
-			Group: uint(targetGID),
-		}
-
-		log.Printf("bootstrap mode: persist=%t owner=%d group=%d ifname=%s", params.Persist, targetUID, targetGID, ifName)
-	}
-
-	cfg := water.Config{
-		DeviceType:             water.TUN,
-		PlatformSpecificParams: params,
-	}
-
-	var dev io.ReadWriteCloser
-	var devName string
-
-	ifce, err := water.New(cfg)
+	device, err := Open(OpenOptions{
+		Name:      ifName,
+		Bootstrap: bootstrap,
+		OwnerID:   ownerID,
+		GroupID:   groupID,
+	})
 	if err != nil {
-		if !bootstrap && isPermissionErr(err) {
-			f, name, directErr := openTunDirect(ifName)
-			if directErr == nil {
-				log.Printf("water.New hit permission error (%v), fallback direct-open succeeded", err)
-				dev = f
-				devName = name
-			} else {
-				return fmt.Errorf("create/open TUN failed: water=%v, direct=%v\n%s", err, directErr, tunCreateHints(err, ifName))
-			}
-		} else {
-			return fmt.Errorf("create/open TUN failed: %w\n%s", err, tunCreateHints(err, ifName))
-		}
-	} else {
-		dev = ifce
-		devName = ifce.Name()
+		return err
 	}
+	dev := device.ReadWriteCloser
+	devName := device.Name
 	if bootstrap {
 		defer dev.Close()
 		log.Printf("bootstrap success: %s is persistent now", devName)
@@ -187,7 +149,7 @@ type ifReq struct {
 }
 
 func openTunDirect(ifName string) (io.ReadWriteCloser, string, error) {
-	fd, err := syscall.Open("/dev/net/tun", os.O_RDWR|syscall.O_NONBLOCK, 0)
+	fd, err := syscall.Open("/dev/net/tun", os.O_RDWR, 0)
 	if err != nil {
 		return nil, "", err
 	}

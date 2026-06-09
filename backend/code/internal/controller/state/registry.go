@@ -4,6 +4,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
+	"hash/fnv"
 	"math"
 	"sort"
 	"strings"
@@ -16,14 +17,30 @@ import (
 
 const (
 	offlineAfter              = config.DefaultHeartbeatInterval * 3
-	defaultMetricHistoryLimit = 120
+	missedHeartbeatLimit      = 3
+	metricRetentionWindow     = 24 * time.Hour
+	rawMetricWindow           = time.Hour
+	metricAggregationInterval = time.Minute
+	pairKeySep                = "\x00"
 )
+
+type peerObservation struct {
+	LastSeen time.Time
+	Misses   int
+}
+
+type edgeTypeState struct {
+	LinkType string
+	LastSeen time.Time
+}
 
 type Registry struct {
 	mu              sync.RWMutex
 	nodes           map[string]protocol.NodeInfo
 	machineIndex    map[string]string
-	metrics         map[string][]protocol.NodeMetricPoint
+	peerReports     map[string]map[string]peerObservation
+	edgeTypes       map[string]edgeTypeState
+	linkMetrics     map[string][]protocol.DashboardMetricPoint
 	nextVirtualHost int
 	startedAt       time.Time
 }
@@ -32,7 +49,9 @@ func NewRegistry() *Registry {
 	return &Registry{
 		nodes:           make(map[string]protocol.NodeInfo),
 		machineIndex:    make(map[string]string),
-		metrics:         make(map[string][]protocol.NodeMetricPoint),
+		peerReports:     make(map[string]map[string]peerObservation),
+		edgeTypes:       make(map[string]edgeTypeState),
+		linkMetrics:     make(map[string][]protocol.DashboardMetricPoint),
 		nextVirtualHost: 2,
 		startedAt:       time.Now().UTC(),
 	}
@@ -67,6 +86,8 @@ func (r *Registry) Register(req protocol.RegisterNodeRequest, clientIP string) p
 			node.NATType = protocol.DefaultNATType
 		}
 		r.nodes[existingID] = node
+		delete(r.peerReports, existingID)
+		r.removeEdgeTypesForNodeLocked(existingID)
 		r.refreshDerivedStateLocked(now)
 		return node
 	}
@@ -91,42 +112,36 @@ func (r *Registry) Register(req protocol.RegisterNodeRequest, clientIP string) p
 	return node
 }
 
-func (r *Registry) Heartbeat(nodeID string, req protocol.HeartbeatRequest, clientIP string) (protocol.NodeInfo, int, bool) {
+func (r *Registry) Heartbeat(nodeID string, req protocol.HeartbeatRequest, _ string) (protocol.NodeInfo, int, int, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	now := time.Now().UTC()
+	r.refreshDerivedStateLocked(now)
+
 	node, ok := r.nodes[nodeID]
 	if !ok {
-		return protocol.NodeInfo{}, 0, false
+		return protocol.NodeInfo{}, 0, 0, false
 	}
 
 	natType := strings.TrimSpace(req.NATType)
-	if natType == "" {
-		natType = protocol.DefaultNATType
-	}
-
 	publicIP := strings.TrimSpace(req.PublicIP)
-	if publicIP == "" {
-		publicIP = strings.TrimSpace(clientIP)
-	}
-	if publicIP == "" {
-		publicIP = node.PublicIP
-	}
-
 	node.NATType = natType
 	node.PublicIP = publicIP
 	node.PublicPort = req.PublicPort
 	node.CurrentRXBytes = req.CurrentRXBytes
 	node.CurrentTXBytes = req.CurrentTXBytes
 	node.Status = protocol.NodeStatusOnline
-	node.LastSeen = time.Now().UTC()
+	node.LastSeen = now
 	r.nodes[nodeID] = node
 
-	r.refreshDerivedStateLocked(node.LastSeen)
-	node = r.nodes[nodeID]
-	r.appendMetricLocked(node)
+	connectedTargets := r.applyPeerReportLocked(nodeID, req.ConnectedPeerIDs, now)
+	r.appendLinkMetricsLocked(nodeID, connectedTargets, req.LinkMetrics, now)
 
-	return node, node.ConnectedPeers, true
+	r.refreshDerivedStateLocked(now)
+	node = r.nodes[nodeID]
+
+	return node, node.ConnectedPeers, r.onlinePeerCountLocked(nodeID), true
 }
 
 func (r *Registry) DashboardStats() protocol.DashboardStatsData {
@@ -139,7 +154,7 @@ func (r *Registry) DashboardStats() protocol.DashboardStatsData {
 	stats := protocol.DashboardStatsData{
 		TotalNodes:          len(r.nodes),
 		ControllerUptimeSec: int64(now.Sub(r.startedAt).Seconds()),
-		LastUpdatedAt:       now,
+		LastUpdatedAt:       now.Unix(),
 	}
 
 	for _, node := range r.nodes {
@@ -181,6 +196,24 @@ func (r *Registry) DashboardEdges() []protocol.DashboardEdge {
 	return r.dashboardEdgesLocked()
 }
 
+func (r *Registry) LinkMetrics(nodeID string, targetID string, window time.Duration) (protocol.DashboardNodeMetricsData, bool, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if _, ok := r.nodes[nodeID]; !ok {
+		return protocol.DashboardNodeMetricsData{}, false, false
+	}
+	if _, ok := r.nodes[targetID]; !ok {
+		return protocol.DashboardNodeMetricsData{}, true, false
+	}
+
+	now := time.Now().UTC()
+	points := filterMetricsByWindow(r.linkMetrics[directionKey(nodeID, targetID)], now, window)
+	return protocol.DashboardNodeMetricsData{
+		Metrics: aggregateMetrics(points, now, window),
+	}, true, true
+}
+
 func (r *Registry) PeersFor(nodeID string) ([]protocol.PeerInfo, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -202,15 +235,22 @@ func (r *Registry) PeersFor(nodeID string) ([]protocol.PeerInfo, bool) {
 			continue
 		}
 
-		peers = append(peers, protocol.PeerInfo{
+		mode := recommendModeFor(requester, node)
+		peer := protocol.PeerInfo{
 			TargetNodeID:     node.NodeID,
 			TargetHostname:   node.Hostname,
 			TargetVirtualIP:  node.VirtualIP,
 			TargetPublicIP:   node.PublicIP,
 			TargetPublicPort: node.PublicPort,
 			NATType:          node.NATType,
-			RecommendMode:    recommendMode(requester.NATType, node.NATType),
-		})
+			RecommendMode:    mode,
+		}
+		if mode == protocol.RecommendModeRelay {
+			peer.RelayAddr = config.DefaultRelayAddr
+			peer.RelayPort = config.DefaultRelayPort
+			peer.RelaySessionID = relaySessionID(nodeID, node.NodeID)
+		}
+		peers = append(peers, peer)
 	}
 
 	sort.Slice(peers, func(i, j int) bool {
@@ -254,33 +294,6 @@ func (r *Registry) CleanupExpiredNodes() int {
 	return r.refreshDerivedStateLocked(time.Now().UTC())
 }
 
-func (r *Registry) NodeMetrics(nodeID string, limit int) (protocol.NodeMetricsResponse, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	if _, ok := r.nodes[nodeID]; !ok {
-		return protocol.NodeMetricsResponse{}, false
-	}
-
-	points := r.metrics[nodeID]
-	if limit <= 0 || limit > len(points) {
-		limit = len(points)
-	}
-
-	start := len(points) - limit
-	if start < 0 {
-		start = 0
-	}
-
-	copied := make([]protocol.NodeMetricPoint, len(points[start:]))
-	copy(copied, points[start:])
-
-	return protocol.NodeMetricsResponse{
-		NodeID: nodeID,
-		Points: copied,
-	}, true
-}
-
 func (r *Registry) nextNodeIDLocked(machineID string) string {
 	sum := sha1.Sum([]byte(machineID))
 	base := "nw-node-" + hex.EncodeToString(sum[:])[:8]
@@ -313,40 +326,113 @@ func (r *Registry) virtualIPInUseLocked(virtualIP string) bool {
 	return false
 }
 
+func (r *Registry) applyPeerReportLocked(nodeID string, peerIDs []string, now time.Time) map[string]struct{} {
+	validTargets := make(map[string]struct{}, len(peerIDs))
+	for _, rawPeerID := range peerIDs {
+		peerID := strings.TrimSpace(rawPeerID)
+		if peerID == "" || peerID == nodeID {
+			continue
+		}
+		if _, exists := r.nodes[peerID]; !exists {
+			continue
+		}
+		validTargets[peerID] = struct{}{}
+	}
+
+	report := r.peerReports[nodeID]
+	if report == nil {
+		report = make(map[string]peerObservation)
+		r.peerReports[nodeID] = report
+	}
+
+	for peerID, obs := range report {
+		if _, stillConnected := validTargets[peerID]; stillConnected {
+			obs.LastSeen = now
+			obs.Misses = 0
+			report[peerID] = obs
+			continue
+		}
+
+		obs.Misses++
+		if obs.Misses >= missedHeartbeatLimit {
+			delete(report, peerID)
+			continue
+		}
+		report[peerID] = obs
+	}
+
+	for peerID := range validTargets {
+		if _, exists := report[peerID]; exists {
+			continue
+		}
+		report[peerID] = peerObservation{
+			LastSeen: now,
+			Misses:   0,
+		}
+	}
+
+	return validTargets
+}
+
+func (r *Registry) appendLinkMetricsLocked(nodeID string, connectedTargets map[string]struct{}, metrics []protocol.LinkMetricReport, now time.Time) {
+	timestamp := now.Unix()
+	for _, metric := range metrics {
+		targetID := strings.TrimSpace(metric.TargetNodeID)
+		if _, connected := connectedTargets[targetID]; !connected {
+			continue
+		}
+		if _, exists := r.nodes[targetID]; !exists || targetID == nodeID {
+			continue
+		}
+
+		linkType := normalizeLinkType(metric.LinkType)
+		if linkType == "" {
+			continue
+		}
+
+		key := directionKey(nodeID, targetID)
+		points := appendOrReplaceMetricPoint(r.linkMetrics[key], protocol.DashboardMetricPoint{
+			Timestamp: timestamp,
+			LatencyMS: metric.LatencyMS,
+		})
+		r.linkMetrics[key] = trimMetricHistory(points, now)
+
+		r.edgeTypes[edgeKey(nodeID, targetID)] = edgeTypeState{
+			LinkType: linkType,
+			LastSeen: now,
+		}
+	}
+}
+
 func (r *Registry) dashboardEdgesLocked() []protocol.DashboardEdge {
-	onlineNodes := make([]protocol.NodeInfo, 0, len(r.nodes))
-	for _, node := range r.nodes {
-		if node.Status == protocol.NodeStatusOnline {
-			onlineNodes = append(onlineNodes, node)
+	onlineByID := r.onlineNodeSetLocked()
+	edges := make([]protocol.DashboardEdge, 0, len(r.edgeTypes))
+
+	for key, edgeType := range r.edgeTypes {
+		source, target, ok := splitEdgeKey(key)
+		if !ok || !onlineByID[source] || !onlineByID[target] {
+			continue
 		}
+		if !r.hasMutualPeerReportLocked(source, target) {
+			continue
+		}
+		if edgeType.LinkType == "" {
+			continue
+		}
+
+		edges = append(edges, protocol.DashboardEdge{
+			Source: source,
+			Target: target,
+			Type:   edgeType.LinkType,
+		})
 	}
 
-	sort.Slice(onlineNodes, func(i, j int) bool {
-		return onlineNodes[i].NodeID < onlineNodes[j].NodeID
+	sort.Slice(edges, func(i, j int) bool {
+		if edges[i].Source == edges[j].Source {
+			return edges[i].Target < edges[j].Target
+		}
+		return edges[i].Source < edges[j].Source
 	})
-
-	edges := make([]protocol.DashboardEdge, 0, len(onlineNodes))
-	for i := 0; i < len(onlineNodes); i++ {
-		for j := i + 1; j < len(onlineNodes); j++ {
-			source := onlineNodes[i]
-			target := onlineNodes[j]
-			edges = append(edges, protocol.DashboardEdge{
-				EdgeID:          source.NodeID + "__" + target.NodeID,
-				SourceNodeID:    source.NodeID,
-				TargetNodeID:    target.NodeID,
-				SourceHostname:  source.Hostname,
-				TargetHostname:  target.Hostname,
-				SourceVirtualIP: source.VirtualIP,
-				TargetVirtualIP: target.VirtualIP,
-				SourcePublicIP:  source.PublicIP,
-				TargetPublicIP:  target.PublicIP,
-				RecommendMode:   recommendMode(source.NATType, target.NATType),
-				Status:          protocol.EdgeStatusActive,
-				LastSeen:        olderTime(source.LastSeen, target.LastSeen),
-			})
-		}
-	}
-
 	return edges
 }
 
@@ -355,14 +441,12 @@ func (r *Registry) isOnlineLocked(node protocol.NodeInfo, now time.Time) bool {
 }
 
 func (r *Registry) refreshDerivedStateLocked(now time.Time) int {
-	onlineCount := 0
 	expiredCount := 0
 	onlineByID := make(map[string]bool, len(r.nodes))
 
 	for id, node := range r.nodes {
 		if r.isOnlineLocked(node, now) {
 			node.Status = protocol.NodeStatusOnline
-			onlineCount++
 			onlineByID[id] = true
 		} else {
 			if node.Status != protocol.NodeStatusOffline {
@@ -378,30 +462,81 @@ func (r *Registry) refreshDerivedStateLocked(now time.Time) int {
 		if !onlineByID[id] {
 			continue
 		}
-		node.ConnectedPeers = max(onlineCount-1, 0)
+		node.ConnectedPeers = r.connectedPeerCountLocked(id, onlineByID)
 		r.nodes[id] = node
 	}
 
+	r.pruneInactiveEdgeTypesLocked(onlineByID)
 	return expiredCount
 }
 
-func (r *Registry) appendMetricLocked(node protocol.NodeInfo) {
-	points := append(r.metrics[node.NodeID], protocol.NodeMetricPoint{
-		Timestamp:      node.LastSeen,
-		CurrentRXBytes: node.CurrentRXBytes,
-		CurrentTXBytes: node.CurrentTXBytes,
-		ConnectedPeers: node.ConnectedPeers,
-		Status:         node.Status,
-	})
-
-	if len(points) > defaultMetricHistoryLimit {
-		points = points[len(points)-defaultMetricHistoryLimit:]
+func (r *Registry) connectedPeerCountLocked(nodeID string, onlineByID map[string]bool) int {
+	count := 0
+	for peerID := range r.peerReports[nodeID] {
+		if !onlineByID[peerID] {
+			continue
+		}
+		if r.hasMutualPeerReportLocked(nodeID, peerID) {
+			count++
+		}
 	}
+	return count
+}
 
-	r.metrics[node.NodeID] = points
+func (r *Registry) hasMutualPeerReportLocked(a string, b string) bool {
+	if _, ok := r.peerReports[a][b]; !ok {
+		return false
+	}
+	if _, ok := r.peerReports[b][a]; !ok {
+		return false
+	}
+	return true
+}
+
+func (r *Registry) onlinePeerCountLocked(nodeID string) int {
+	count := 0
+	for id, node := range r.nodes {
+		if id != nodeID && node.Status == protocol.NodeStatusOnline {
+			count++
+		}
+	}
+	return count
+}
+
+func (r *Registry) onlineNodeSetLocked() map[string]bool {
+	onlineByID := make(map[string]bool, len(r.nodes))
+	for id, node := range r.nodes {
+		if node.Status == protocol.NodeStatusOnline {
+			onlineByID[id] = true
+		}
+	}
+	return onlineByID
+}
+
+func (r *Registry) pruneInactiveEdgeTypesLocked(onlineByID map[string]bool) {
+	for key := range r.edgeTypes {
+		source, target, ok := splitEdgeKey(key)
+		if !ok || !onlineByID[source] || !onlineByID[target] || !r.hasMutualPeerReportLocked(source, target) {
+			delete(r.edgeTypes, key)
+		}
+	}
+}
+
+func (r *Registry) removeEdgeTypesForNodeLocked(nodeID string) {
+	for key := range r.edgeTypes {
+		source, target, ok := splitEdgeKey(key)
+		if !ok || source == nodeID || target == nodeID {
+			delete(r.edgeTypes, key)
+		}
+	}
 }
 
 func dashboardNodeFromInfo(node protocol.NodeInfo) protocol.DashboardNode {
+	lastSeen := int64(0)
+	if !node.LastSeen.IsZero() {
+		lastSeen = node.LastSeen.Unix()
+	}
+
 	return protocol.DashboardNode{
 		NodeID:         node.NodeID,
 		MachineID:      node.MachineID,
@@ -416,28 +551,168 @@ func dashboardNodeFromInfo(node protocol.NodeInfo) protocol.DashboardNode {
 		ConnectedPeers: node.ConnectedPeers,
 		CurrentRXBytes: node.CurrentRXBytes,
 		CurrentTXBytes: node.CurrentTXBytes,
-		LastSeen:       node.LastSeen,
+		LastSeen:       lastSeen,
 	}
 }
 
-func olderTime(a time.Time, b time.Time) time.Time {
-	if a.IsZero() {
-		return b
-	}
-	if b.IsZero() {
-		return a
-	}
-	if a.Before(b) {
-		return a
-	}
-	return b
-}
-
-func recommendMode(natTypes ...string) string {
-	for _, natType := range natTypes {
-		if strings.Contains(strings.ToLower(natType), "symmetric") {
+func recommendModeFor(nodes ...protocol.NodeInfo) string {
+	for _, node := range nodes {
+		if requiresRelay(node) {
 			return protocol.RecommendModeRelay
 		}
 	}
 	return protocol.RecommendModeP2P
+}
+
+func requiresRelay(node protocol.NodeInfo) bool {
+	natType := strings.ToLower(strings.TrimSpace(node.NATType))
+	if natType == strings.ToLower(protocol.DefaultNATType) {
+		return true
+	}
+	if strings.Contains(natType, "symmetric") {
+		return true
+	}
+	return strings.TrimSpace(node.PublicIP) == "" || node.PublicPort <= 0
+}
+
+func relaySessionID(a string, b string) uint32 {
+	source, target := orderedPair(a, b)
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(source))
+	_, _ = h.Write([]byte(pairKeySep))
+	_, _ = h.Write([]byte(target))
+	sessionID := h.Sum32()
+	if sessionID == 0 {
+		return 1
+	}
+	return sessionID
+}
+
+func edgeKey(a string, b string) string {
+	source, target := orderedPair(a, b)
+	return source + pairKeySep + target
+}
+
+func directionKey(source string, target string) string {
+	return source + pairKeySep + target
+}
+
+func splitEdgeKey(key string) (string, string, bool) {
+	parts := strings.Split(key, pairKeySep)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
+func orderedPair(a string, b string) (string, string) {
+	if a <= b {
+		return a, b
+	}
+	return b, a
+}
+
+func normalizeLinkType(linkType string) string {
+	switch strings.ToLower(strings.TrimSpace(linkType)) {
+	case protocol.LinkTypeP2P:
+		return protocol.LinkTypeP2P
+	case protocol.LinkTypeRelay:
+		return protocol.LinkTypeRelay
+	default:
+		return ""
+	}
+}
+
+func appendOrReplaceMetricPoint(points []protocol.DashboardMetricPoint, point protocol.DashboardMetricPoint) []protocol.DashboardMetricPoint {
+	if len(points) > 0 && points[len(points)-1].Timestamp == point.Timestamp {
+		points[len(points)-1] = point
+		return points
+	}
+	return append(points, point)
+}
+
+func trimMetricHistory(points []protocol.DashboardMetricPoint, now time.Time) []protocol.DashboardMetricPoint {
+	cutoff := now.Add(-metricRetentionWindow).Unix()
+	first := 0
+	for first < len(points) && points[first].Timestamp < cutoff {
+		first++
+	}
+	if first == 0 {
+		return points
+	}
+	trimmed := make([]protocol.DashboardMetricPoint, len(points)-first)
+	copy(trimmed, points[first:])
+	return trimmed
+}
+
+func filterMetricsByWindow(points []protocol.DashboardMetricPoint, now time.Time, window time.Duration) []protocol.DashboardMetricPoint {
+	if window <= 0 {
+		window = rawMetricWindow
+	}
+	cutoff := now.Add(-window).Unix()
+	filtered := make([]protocol.DashboardMetricPoint, 0, len(points))
+	for _, point := range points {
+		if point.Timestamp >= cutoff {
+			filtered = append(filtered, point)
+		}
+	}
+	return filtered
+}
+
+func aggregateMetrics(points []protocol.DashboardMetricPoint, now time.Time, window time.Duration) []protocol.DashboardMetricPoint {
+	if window <= rawMetricWindow {
+		copied := make([]protocol.DashboardMetricPoint, len(points))
+		copy(copied, points)
+		sortMetrics(copied)
+		return copied
+	}
+
+	rawCutoff := now.Add(-rawMetricWindow).Unix()
+	type bucketValue struct {
+		sum   float64
+		count int
+	}
+	buckets := make(map[int64]bucketValue)
+	result := make([]protocol.DashboardMetricPoint, 0, len(points))
+
+	for _, point := range points {
+		if point.Timestamp >= rawCutoff {
+			result = append(result, point)
+			continue
+		}
+
+		bucket := point.Timestamp - point.Timestamp%int64(metricAggregationInterval.Seconds())
+		value := buckets[bucket]
+		value.sum += point.LatencyMS
+		value.count++
+		buckets[bucket] = value
+	}
+
+	bucketTimestamps := make([]int64, 0, len(buckets))
+	for timestamp := range buckets {
+		bucketTimestamps = append(bucketTimestamps, timestamp)
+	}
+	sort.Slice(bucketTimestamps, func(i, j int) bool {
+		return bucketTimestamps[i] < bucketTimestamps[j]
+	})
+
+	for _, timestamp := range bucketTimestamps {
+		value := buckets[timestamp]
+		if value.count == 0 {
+			continue
+		}
+		result = append(result, protocol.DashboardMetricPoint{
+			Timestamp: timestamp,
+			LatencyMS: math.Round(value.sum/float64(value.count)*100) / 100,
+		})
+	}
+
+	sortMetrics(result)
+	return result
+}
+
+func sortMetrics(points []protocol.DashboardMetricPoint) {
+	sort.Slice(points, func(i, j int) bool {
+		return points[i].Timestamp < points[j].Timestamp
+	})
 }

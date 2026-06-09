@@ -2,8 +2,8 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -28,19 +28,25 @@ func NewRouter(registry *state.Registry) *gin.Engine {
 
 	v1 := r.Group("/api/v1")
 	{
-		dashboard := v1.Group("/dashboard")
+		auth := v1.Group("/auth")
+		{
+			auth.POST("/login", server.Login)
+		}
+
+		dashboard := v1.Group("/dashboard", requireDashboardJWT())
 		{
 			dashboard.GET("/stats", server.GetDashboardStats)
 			dashboard.GET("/nodes", server.GetDashboardNodes)
 			dashboard.GET("/edges", server.GetDashboardEdges)
+			dashboard.GET("/nodes/:node_id/metrics", server.GetDashboardNodeMetrics)
 		}
 
-		nodes := v1.Group("/nodes")
+		nodes := v1.Group("/nodes", requireNodePSK())
 		{
 			nodes.POST("/register", server.RegisterNode)
 			nodes.POST("/:node_id/heartbeat", server.Heartbeat)
 			nodes.GET("/:node_id/peers", server.GetPeers)
-			nodes.GET("/:node_id/metrics", server.GetNodeMetrics)
+			nodes.GET("/:node_id/metrics", server.GetDashboardNodeMetrics)
 		}
 	}
 
@@ -54,6 +60,38 @@ func (s *Server) Ping(c *gin.Context) {
 func (s *Server) ListNodes(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"nodes": s.registry.List(),
+	})
+}
+
+func (s *Server) Login(c *gin.Context) {
+	var req protocol.AuthLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	username := strings.TrimSpace(req.Username)
+	password := strings.TrimSpace(req.Password)
+	if username == "" || password == "" {
+		respondError(c, http.StatusBadRequest, "username and password are required")
+		return
+	}
+	if !validDashboardCredential(username, password) {
+		respondError(c, http.StatusUnauthorized, "unauthorized: invalid username or password")
+		return
+	}
+
+	token, expiresAt, err := issueDashboardToken(username, time.Now().UTC())
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "failed to issue token")
+		return
+	}
+
+	respondOK(c, protocol.AuthLoginResponse{
+		Token:     token,
+		TokenType: "Bearer",
+		ExpiresIn: dashboardTokenTTLSeconds,
+		ExpiresAt: expiresAt,
 	})
 }
 
@@ -105,21 +143,25 @@ func (s *Server) Heartbeat(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	if msg := validateHeartbeat(req); msg != "" {
+		respondError(c, http.StatusBadRequest, msg)
+		return
+	}
 
-	_, onlinePeerCount, ok := s.registry.Heartbeat(nodeID, req, c.ClientIP())
+	_, connectedPeerCount, onlinePeerCount, ok := s.registry.Heartbeat(nodeID, req, c.ClientIP())
 	if !ok {
 		respondError(c, http.StatusNotFound, "node not found")
 		return
 	}
 
 	action := protocol.ActionNone
-	if onlinePeerCount > 0 {
+	if onlinePeerCount > connectedPeerCount {
 		action = protocol.ActionSyncPeers
 	}
 
 	respondOK(c, protocol.HeartbeatResponse{
 		ActionRequired: action,
-		ConnectedPeers: onlinePeerCount,
+		ConnectedPeers: connectedPeerCount,
 	})
 }
 
@@ -141,30 +183,97 @@ func (s *Server) GetPeers(c *gin.Context) {
 	})
 }
 
-func (s *Server) GetNodeMetrics(c *gin.Context) {
+func (s *Server) GetDashboardNodeMetrics(c *gin.Context) {
 	nodeID := c.Param("node_id")
 	if nodeID == "" {
 		respondError(c, http.StatusBadRequest, "node_id is required")
 		return
 	}
 
-	limit := 60
-	if rawLimit := c.Query("limit"); rawLimit != "" {
-		parsedLimit, err := strconv.Atoi(rawLimit)
-		if err != nil || parsedLimit < 0 {
-			respondError(c, http.StatusBadRequest, "limit must be a non-negative integer")
-			return
-		}
-		limit = parsedLimit
+	targetID := strings.TrimSpace(c.Query("target_id"))
+	if targetID == "" {
+		respondError(c, http.StatusBadRequest, "target_id is required")
+		return
+	}
+	if targetID == nodeID {
+		respondError(c, http.StatusBadRequest, "target_id must be different from node_id")
+		return
 	}
 
-	metrics, ok := s.registry.NodeMetrics(nodeID, limit)
+	window, ok := parseTimeRange(c.DefaultQuery("time_range", "1h"))
 	if !ok {
+		respondError(c, http.StatusBadRequest, "invalid time_range")
+		return
+	}
+
+	metrics, nodeOK, targetOK := s.registry.LinkMetrics(nodeID, targetID, window)
+	if !nodeOK {
 		respondError(c, http.StatusNotFound, "node not found")
+		return
+	}
+	if !targetOK {
+		respondError(c, http.StatusNotFound, "target not found")
 		return
 	}
 
 	respondOK(c, metrics)
+}
+
+func validateHeartbeat(req protocol.HeartbeatRequest) string {
+	natType := strings.TrimSpace(req.NATType)
+	if natType == "" {
+		return "nat_type is required"
+	}
+	if req.ConnectedPeerIDs == nil {
+		return "connected_peer_ids is required"
+	}
+
+	publicIP := strings.TrimSpace(req.PublicIP)
+	unknownWithoutMapping := strings.EqualFold(natType, protocol.DefaultNATType) && publicIP == "" && req.PublicPort == 0
+	if !unknownWithoutMapping {
+		if publicIP == "" {
+			return "public_ip is required"
+		}
+		if req.PublicPort <= 0 {
+			return "public_port must be greater than 0"
+		}
+	}
+
+	for _, metric := range req.LinkMetrics {
+		if strings.TrimSpace(metric.TargetNodeID) == "" {
+			return "link_metrics.target_node_id is required"
+		}
+		if metric.LatencyMS < 0 {
+			return "link_metrics.latency_ms must be non-negative"
+		}
+		if !isValidLinkType(metric.LinkType) {
+			return "link_metrics.link_type must be p2p or relay"
+		}
+	}
+
+	return ""
+}
+
+func isValidLinkType(linkType string) bool {
+	switch strings.TrimSpace(strings.ToLower(linkType)) {
+	case protocol.LinkTypeP2P, protocol.LinkTypeRelay:
+		return true
+	default:
+		return false
+	}
+}
+
+func parseTimeRange(raw string) (time.Duration, bool) {
+	switch raw {
+	case "", "1h":
+		return time.Hour, true
+	case "12h":
+		return 12 * time.Hour, true
+	case "24h":
+		return 24 * time.Hour, true
+	default:
+		return 0, false
+	}
 }
 
 func respondOK[T any](c *gin.Context, data T) {

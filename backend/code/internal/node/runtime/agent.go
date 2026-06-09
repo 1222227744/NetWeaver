@@ -7,15 +7,18 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
 	goruntime "runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"netweaver-backend/internal/node/client"
+	nodetun "netweaver-backend/internal/node/tun"
 	"netweaver-backend/pkg/config"
 	"netweaver-backend/pkg/protocol"
 )
@@ -28,6 +31,12 @@ type Config struct {
 	NATType           string
 	PublicIP          string
 	PublicPort        int
+	STUNServers       []string
+	DataListenAddr    string
+	PSK               string
+	TUNEnabled        bool
+	TUNName           string
+	TUNBufferSize     int
 	HeartbeatInterval time.Duration
 	PeerInterval      time.Duration
 }
@@ -37,6 +46,11 @@ type Agent struct {
 	client    *client.Client
 	nodeID    string
 	virtualIP string
+	dataConn  *net.UDPConn
+	linker    *linkManager
+	tunMu     sync.RWMutex
+	tunDev    io.ReadWriteCloser
+	tunName   string
 }
 
 func Run(ctx context.Context, args []string) error {
@@ -48,6 +62,12 @@ func Run(ctx context.Context, args []string) error {
 	natType := fs.String("nat-type", protocol.DefaultNATType, "NAT type reported to controller")
 	publicIP := fs.String("public-ip", "", "public IP reported in heartbeat; default lets controller infer it")
 	publicPort := fs.Int("public-port", 0, "public port reported in heartbeat")
+	stunServers := fs.String("stun-servers", config.DefaultSTUNServers, "comma-separated STUN endpoints")
+	dataListenAddr := fs.String("data-addr", "0.0.0.0:0", "UDP address used for STUN, P2P punch and data plane")
+	psk := fs.String("psk", config.NodePSK(), "node pre-shared key for controller node APIs")
+	tunEnabled := fs.Bool("tun", true, "enable TUN data plane in run mode")
+	tunName := fs.String("tun-name", config.DefaultTUNName, "TUN interface used for data plane")
+	tunBufferSize := fs.Int("tun-buf", 65535, "TUN packet read buffer size")
 	heartbeatInterval := fs.Duration("interval", config.DefaultHeartbeatInterval, "heartbeat interval")
 	peerInterval := fs.Duration("peer-interval", config.DefaultHeartbeatInterval, "peer sync interval")
 	if err := fs.Parse(args); err != nil {
@@ -59,6 +79,9 @@ func Run(ctx context.Context, args []string) error {
 	}
 	if *peerInterval <= 0 {
 		return fmt.Errorf("invalid -peer-interval: %s", peerInterval.String())
+	}
+	if *tunBufferSize <= 0 {
+		return fmt.Errorf("invalid -tun-buf: %d", *tunBufferSize)
 	}
 
 	resolvedHostname := strings.TrimSpace(*hostname)
@@ -84,6 +107,12 @@ func Run(ctx context.Context, args []string) error {
 		NATType:           strings.TrimSpace(*natType),
 		PublicIP:          strings.TrimSpace(*publicIP),
 		PublicPort:        *publicPort,
+		STUNServers:       splitCSV(*stunServers),
+		DataListenAddr:    strings.TrimSpace(*dataListenAddr),
+		PSK:               strings.TrimSpace(*psk),
+		TUNEnabled:        *tunEnabled,
+		TUNName:           strings.TrimSpace(*tunName),
+		TUNBufferSize:     *tunBufferSize,
 		HeartbeatInterval: *heartbeatInterval,
 		PeerInterval:      *peerInterval,
 	})
@@ -104,11 +133,25 @@ func New(cfg Config) *Agent {
 	if cfg.PeerInterval <= 0 {
 		cfg.PeerInterval = cfg.HeartbeatInterval
 	}
-
-	return &Agent{
-		cfg:    cfg,
-		client: client.New(cfg.ControllerURL),
+	if cfg.DataListenAddr == "" {
+		cfg.DataListenAddr = "0.0.0.0:0"
 	}
+	if cfg.PSK == "" {
+		cfg.PSK = config.NodePSK()
+	}
+	if cfg.TUNName == "" {
+		cfg.TUNName = config.DefaultTUNName
+	}
+	if cfg.TUNBufferSize <= 0 {
+		cfg.TUNBufferSize = 65535
+	}
+
+	agent := &Agent{
+		cfg:    cfg,
+		client: client.NewWithPSK(cfg.ControllerURL, cfg.PSK),
+	}
+	agent.linker = newLinkManager(agent)
+	return agent
 }
 
 func (a *Agent) Run(ctx context.Context) error {
@@ -124,6 +167,15 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 
 	log.Printf("node registered: node_id=%s virtual_ip=%s controller=%s", a.nodeID, a.virtualIP, a.cfg.ControllerURL)
+
+	if err := a.openDataSocket(ctx); err != nil {
+		log.Printf("data socket disabled: %v", err)
+	} else {
+		a.detectNAT(ctx)
+		go a.linker.readLoop(ctx, a.dataConn)
+		go a.linker.probeLoop(ctx)
+		a.startTUNDataPlane(ctx)
+	}
 
 	if err := a.sendHeartbeat(ctx); err != nil {
 		log.Printf("initial heartbeat failed: %v", err)
@@ -150,6 +202,79 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 }
 
+func (a *Agent) startTUNDataPlane(ctx context.Context) {
+	if !a.cfg.TUNEnabled {
+		log.Printf("TUN data plane disabled")
+		return
+	}
+	if a.dataConn == nil {
+		log.Printf("TUN data plane disabled: data socket is not open")
+		return
+	}
+
+	device, err := nodetun.Open(nodetun.OpenOptions{
+		Name: a.cfg.TUNName,
+	})
+	if err != nil {
+		log.Printf("TUN data plane disabled: %v", err)
+		return
+	}
+
+	a.tunMu.Lock()
+	a.tunDev = device.ReadWriteCloser
+	a.tunName = device.Name
+	a.tunMu.Unlock()
+
+	log.Printf("TUN data plane enabled: ifname=%s virtual_ip=%s", device.Name, a.virtualIP)
+	log.Printf("TUN setup reminder: sudo ip addr add %s/16 dev %s && sudo ip link set %s up", a.virtualIP, device.Name, device.Name)
+
+	go func() {
+		<-ctx.Done()
+		_ = device.Close()
+	}()
+	go a.tunReadLoop(ctx, device)
+}
+
+func (a *Agent) tunReadLoop(ctx context.Context, device *nodetun.Device) {
+	buf := make([]byte, a.cfg.TUNBufferSize)
+	for {
+		n, err := device.Read(buf)
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				log.Printf("TUN read failed: %v", err)
+				return
+			}
+		}
+		if n == 0 {
+			continue
+		}
+
+		packet := make([]byte, n)
+		copy(packet, buf[:n])
+		if err := a.linker.sendData(packet); err != nil {
+			log.Printf("drop outbound TUN packet: %v", err)
+		}
+	}
+}
+
+func (a *Agent) writeTUN(packet []byte) error {
+	a.tunMu.RLock()
+	dev := a.tunDev
+	name := a.tunName
+	a.tunMu.RUnlock()
+
+	if dev == nil {
+		return fmt.Errorf("TUN data plane is not open")
+	}
+	if _, err := dev.Write(packet); err != nil {
+		return fmt.Errorf("write TUN %s: %w", name, err)
+	}
+	return nil
+}
+
 func (a *Agent) register(ctx context.Context) (protocol.RegisterNodeResponse, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, config.DefaultRequestTimeout)
 	defer cancel()
@@ -164,16 +289,20 @@ func (a *Agent) register(ctx context.Context) (protocol.RegisterNodeResponse, er
 
 func (a *Agent) sendHeartbeat(ctx context.Context) error {
 	rxBytes, txBytes := readSystemTrafficBytes()
+	connectedPeerIDs, linkMetrics := a.linker.snapshot()
 
 	reqCtx, cancel := context.WithTimeout(ctx, config.DefaultRequestTimeout)
 	defer cancel()
 
 	resp, err := a.client.Heartbeat(reqCtx, a.nodeID, protocol.HeartbeatRequest{
-		NATType:        a.cfg.NATType,
-		PublicIP:       a.cfg.PublicIP,
-		PublicPort:     a.cfg.PublicPort,
-		CurrentRXBytes: rxBytes,
-		CurrentTXBytes: txBytes,
+		NATType:          a.cfg.NATType,
+		PublicIP:         a.cfg.PublicIP,
+		PublicPort:       a.cfg.PublicPort,
+		CurrentRXBytes:   rxBytes,
+		CurrentTXBytes:   txBytes,
+		ConnectedPeers:   len(connectedPeerIDs),
+		ConnectedPeerIDs: connectedPeerIDs,
+		LinkMetrics:      linkMetrics,
 	})
 	if err != nil {
 		return err
@@ -202,15 +331,51 @@ func (a *Agent) syncPeers(ctx context.Context) {
 	}
 
 	if len(peers.Peers) == 0 {
+		a.linker.replacePeers(nil)
 		log.Printf("peers synced: none")
 		return
 	}
+
+	a.linker.replacePeers(peers.Peers)
+	a.linker.establishPeers(ctx, peers.Peers)
 
 	summary := make([]string, 0, len(peers.Peers))
 	for _, peer := range peers.Peers {
 		summary = append(summary, fmt.Sprintf("%s(%s,%s)", peer.TargetHostname, peer.TargetVirtualIP, peer.RecommendMode))
 	}
 	log.Printf("peers synced: %s", strings.Join(summary, ", "))
+}
+
+func (a *Agent) openDataSocket(ctx context.Context) error {
+	addr, err := net.ResolveUDPAddr("udp", a.cfg.DataListenAddr)
+	if err != nil {
+		return err
+	}
+
+	conn, err := net.ListenUDP("udp", addr)
+	if err != nil {
+		return err
+	}
+
+	a.dataConn = conn
+	log.Printf("data socket listening: %s", conn.LocalAddr().String())
+	return nil
+}
+
+func (a *Agent) detectNAT(ctx context.Context) {
+	if a.dataConn == nil {
+		return
+	}
+	if a.cfg.PublicIP != "" && a.cfg.PublicPort > 0 {
+		log.Printf("using configured public endpoint: nat_type=%s public=%s:%d", a.cfg.NATType, a.cfg.PublicIP, a.cfg.PublicPort)
+		return
+	}
+
+	result := DetectNAT(ctx, a.dataConn, a.cfg.STUNServers, a.cfg.LocalIP)
+	a.cfg.NATType = result.NATType
+	a.cfg.PublicIP = result.PublicIP
+	a.cfg.PublicPort = result.PublicPort
+	log.Printf("stun result: nat_type=%s public=%s:%d", a.cfg.NATType, a.cfg.PublicIP, a.cfg.PublicPort)
 }
 
 func defaultHostname() string {
@@ -340,4 +505,16 @@ func readSystemTrafficBytes() (uint64, uint64) {
 	}
 
 	return rxTotal, txTotal
+}
+
+func splitCSV(raw string) []string {
+	parts := strings.Split(raw, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
 }
