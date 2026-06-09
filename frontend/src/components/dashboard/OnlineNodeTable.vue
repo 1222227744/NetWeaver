@@ -5,6 +5,7 @@ import axios from 'axios'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 import {
+  buildDashboardGraphData,
   clearDashboardAuth,
   getDashboardEdges,
   getDashboardNodes,
@@ -45,8 +46,11 @@ const authState = reactive({
   tokenExpiresAt: initialAuth?.expires_at ?? 0
 })
 
-// allNodes 保存后端返回的全部节点。
-// onlineNodes 是通过 computed 从 allNodes 自动过滤出来的在线节点列表。
+// allNodes 保存后端返回的全部节点，包含 online 和 offline。
+// API v1.8 的 nodes 接口语义就是“所有节点”，
+// 所以关系图和表格都应该基于 allNodes 渲染，不能只保留在线节点。
+//
+// onlineNodes 仍然保留，是因为统计标签、空态判断和部分文案需要单独知道在线数量。
 const allNodes = ref<DashboardNode[]>([])
 const graphEdges = ref<DashboardEdge[]>([])
 const selectedLinkMetrics = ref<DashboardMetricPoint[]>([])
@@ -82,9 +86,14 @@ const timeRangeOptions: Array<{ label: string; value: DashboardMetricsTimeRange 
 ]
 
 const onlineNodes = computed(() => allNodes.value.filter((node) => node.status === 'online'))
+const offlineNodes = computed(() => allNodes.value.filter((node) => node.status === 'offline'))
 
-const isInitialEmptyState = computed(() => {
-  return !state.loading && !state.errorMessage && onlineNodes.value.length === 0
+const isNodeListEmptyState = computed(() => {
+  return !state.loading && !state.errorMessage && allNodes.value.length === 0
+})
+
+const hasOnlyOfflineNodes = computed(() => {
+  return !state.loading && !state.errorMessage && allNodes.value.length > 0 && onlineNodes.value.length === 0
 })
 
 const getStatusTagType = (status: DashboardNode['status']) => {
@@ -220,18 +229,26 @@ const updateOverviewState = (statsData: NonNullable<Awaited<ReturnType<typeof ge
   state.lastUpdatedAt = formatTimestamp(statsData.last_updated_at) || new Date().toLocaleString('zh-CN', { hour12: false })
 }
 
-const findCurrentEdge = (link: GraphLinkItem, edges: DashboardEdge[]) => {
-  return edges.find((edge) => edge.source === link.source && edge.target === link.target) ?? null
+const findCurrentGraphLink = (link: GraphLinkItem, edges: DashboardEdge[]) => {
+  return (
+    buildDashboardGraphData(allNodes.value, edges).links.find(
+      (edge) => edge.source === link.source && edge.target === link.target
+    ) ?? null
+  )
 }
 
 const getLinkMetricsCacheKey = (link: GraphLinkItem) => {
   return `${link.id}::${selectedTimeRange.value}`
 }
 
-const loadLinkMetrics = async (link: GraphLinkItem, options: { force?: boolean; silent?: boolean } = {}) => {
+const loadLinkMetrics = async (
+  link: GraphLinkItem,
+  options: { force?: boolean; silent?: boolean; backgroundRefresh?: boolean } = {}
+) => {
   const currentSerial = ++metricsRequestSerial
   const cacheKey = getLinkMetricsCacheKey(link)
   const cachedMetrics = linkMetricsCache.get(cacheKey)
+  const shouldKeepVisibleMetrics = options.backgroundRefresh === true && Array.isArray(cachedMetrics)
 
   // 鼠标移出再移回同一条链路时，优先显示缓存数据。
   // 这样不会每次悬停都重新出现“链路数据加载中”，也不会重复请求同一时间范围的数据。
@@ -242,11 +259,20 @@ const loadLinkMetrics = async (link: GraphLinkItem, options: { force?: boolean; 
     return
   }
 
-  state.metricsLoading = true
   state.metricsErrorMessage = ''
 
+  // 静默轮询刷新当前链路时，如果页面上已经有旧曲线，就继续显示它，
+  // 同时在后台发起一次真实请求把缓存替换成最新数据。
+  // 这样可以兼顾“数据实时更新”和“不要每 5 秒闪一次加载中”。
+  if (shouldKeepVisibleMetrics && cachedMetrics) {
+    selectedLinkMetrics.value = cachedMetrics
+    state.metricsLoading = false
+  } else {
+    state.metricsLoading = true
+  }
+
   try {
-    const existingRequest = options.force ? null : linkMetricsRequests.get(cacheKey)
+    const existingRequest = linkMetricsRequests.get(cacheKey)
     const metricsRequest =
       existingRequest ??
       getNodeMetrics(link.source, link.target, selectedTimeRange.value).then((result) => {
@@ -277,7 +303,9 @@ const loadLinkMetrics = async (link: GraphLinkItem, options: { force?: boolean; 
       return
     }
 
-    selectedLinkMetrics.value = []
+    if (!shouldKeepVisibleMetrics) {
+      selectedLinkMetrics.value = []
+    }
 
     if (isUnauthorizedError(error)) {
       handleUnauthorized('登录状态无效或已过期，请重新登录后再查看链路数据。')
@@ -291,7 +319,7 @@ const loadLinkMetrics = async (link: GraphLinkItem, options: { force?: boolean; 
       ElMessage.error(`链路监控加载失败：${message}`)
     }
   } finally {
-    if (currentSerial === metricsRequestSerial) {
+    if (currentSerial === metricsRequestSerial && !shouldKeepVisibleMetrics) {
       state.metricsLoading = false
     }
   }
@@ -302,7 +330,7 @@ const syncSelectedLinkAfterEdgesRefresh = (latestEdges: DashboardEdge[]) => {
     return
   }
 
-  const currentEdge = findCurrentEdge(selectedGraphLink.value, latestEdges)
+  const currentEdge = findCurrentGraphLink(selectedGraphLink.value, latestEdges)
 
   if (!currentEdge) {
     selectedGraphLink.value = null
@@ -311,7 +339,9 @@ const syncSelectedLinkAfterEdgesRefresh = (latestEdges: DashboardEdge[]) => {
     return
   }
 
-  void loadLinkMetrics(selectedGraphLink.value, { silent: true })
+  selectedGraphLink.value = currentEdge
+
+  void loadLinkMetrics(currentEdge, { force: true, silent: true, backgroundRefresh: true })
 }
 
 const loadDashboard = async (options: { silent?: boolean } = {}) => {
@@ -607,7 +637,7 @@ onBeforeUnmount(() => {
         :edges="graphEdges"
         :metrics="selectedLinkMetrics"
         :metrics-loading="state.metricsLoading"
-        :online-nodes="onlineNodes"
+        :nodes="allNodes"
         :selected-time-range="selectedTimeRange"
         @link-hover="handleGraphLinkHover"
       />
@@ -615,27 +645,38 @@ onBeforeUnmount(() => {
       <section class="panel-surface p-6">
         <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 class="text-xl font-semibold text-slate-900">在线节点</h2>
+            <h2 class="text-xl font-semibold text-slate-900">节点列表</h2>
           </div>
 
           <div class="flex flex-wrap items-center gap-3">
             <el-tag round type="success">在线 {{ onlineNodes.length }} 台</el-tag>
+            <el-tag round type="info">离线 {{ offlineNodes.length }} 台</el-tag>
+            <el-tag round>总计 {{ allNodes.length }} 台</el-tag>
           </div>
         </div>
 
+        <el-alert
+          v-if="hasOnlyOfflineNodes"
+          class="mt-6"
+          type="warning"
+          show-icon
+          :closable="false"
+          title="当前没有在线节点。列表保留离线节点，便于核对 status、last_seen 和虚拟 IP。"
+        />
+
         <el-empty
-          v-if="isInitialEmptyState"
+          v-if="isNodeListEmptyState"
           class="mt-6 rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50"
-          description="暂无在线节点"
+          description="当前还没有任何节点"
         />
 
         <el-table
           v-loading="state.loading"
-          :data="onlineNodes"
+          :data="allNodes"
           stripe
           border
           class="mt-6"
-          empty-text="当前没有在线节点"
+          empty-text="当前没有节点"
         >
           <el-table-column prop="node_id" label="节点 ID" min-width="180" />
           <el-table-column prop="hostname" label="主机名" min-width="150" />

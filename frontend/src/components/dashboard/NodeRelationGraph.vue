@@ -28,7 +28,7 @@ const props = defineProps<{
   edges: DashboardEdge[]
   metrics: DashboardMetricPoint[]
   metricsLoading: boolean
-  onlineNodes: DashboardNode[]
+  nodes: DashboardNode[]
   selectedTimeRange: DashboardMetricsTimeRange
 }>()
 
@@ -62,16 +62,25 @@ type HoverPanelKind = 'node' | 'link'
 
 // computed 表示“根据 props 自动推导出来的数据”。
 // graphData 是真正交给 ECharts 使用的数据格式。
+//
+// 这里必须传入 props.nodes，也就是“全部节点”：
+// - 在线节点要正常渲染
+// - 离线节点也要保留在图里，并以灰色显示
+//
+// 这是因为 v1.8 的验收要求里明确提到：
+// 节点掉线后，Dashboard 要能看到它的 status 变成 offline，
+// 不能只是从页面上直接消失。
+//
 // 注意：它可以随着 props 自动重新计算，但下面不会再直接深度监听 graphData。
 // 原因是 dashboard 页面会定时轮询后端，节点里的 last_seen、流量等字段经常变化；
 // 如果直接监听完整 graphData，就会导致 ECharts 每几秒强制重绘和重新排布一次。
-const graphData = computed(() => buildDashboardGraphData(props.onlineNodes, props.edges))
+const graphData = computed(() => buildDashboardGraphData(props.nodes, props.edges))
 
 // 这个签名只保留“会影响拓扑图本身”的字段。
 // 它的作用可以理解为：给当前关系图拍一张很小的“身份证照片”。
 //
 // 会触发关系图重绘的变化：
-// - 在线节点新增或消失
+// - 节点新增或消失
 // - 节点名称、虚拟 IP、NAT 类型、状态、邻居数量变化
 // - 连线 source / target / type 变化
 //
@@ -82,7 +91,7 @@ const graphData = computed(() => buildDashboardGraphData(props.onlineNodes, prop
 //
 // 这样轮询仍然可以刷新表格和悬浮卡片数据，但关系图不会被无意义地重新布局。
 const graphTopologySignature = computed(() => {
-  const nodeSignature = props.onlineNodes
+  const nodeSignature = props.nodes
     .map((node) =>
       [
         node.node_id,
@@ -105,6 +114,9 @@ const graphTopologySignature = computed(() => {
   return `${nodeSignature}__${edgeSignature}`
 })
 
+const onlineNodeCount = computed(() => props.nodes.filter((node) => node.status === 'online').length)
+const offlineNodeCount = computed(() => props.nodes.filter((node) => node.status === 'offline').length)
+
 const hoveredSourceNode = computed(() => {
   if (!hoveredLink.value) {
     return null
@@ -126,7 +138,7 @@ const updateHoverPanelPosition = (clientX: number, clientY: number, panelKind: H
   // 这里同时做了边界保护，避免卡片跑出浏览器窗口。
   // 节点卡片没有折线图，链路卡片有折线图，所以两者高度不能共用同一个估算值。
   const cardWidth = 380
-  const cardHeight = panelKind === 'link' ? 430 : 260
+  const cardHeight = panelKind === 'link' ? 430 : 320
   const viewportPadding = 18
   const cursorOffsetX = 24
   const cursorOffsetY = 16
@@ -155,7 +167,7 @@ const updateHoverPanelPosition = (clientX: number, clientY: number, panelKind: H
 }
 
 function findDashboardNodeById(nodeId: string) {
-  return props.onlineNodes.find((node) => node.node_id === nodeId) ?? null
+  return props.nodes.find((node) => node.node_id === nodeId) ?? null
 }
 
 const getPointerPositionFromChartParams = (params: Record<string, unknown>): ChartPointerPosition | null => {
@@ -488,6 +500,15 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="flex flex-wrap items-center gap-3">
+        <el-tag round>
+          总计 {{ props.nodes.length }} 台
+        </el-tag>
+        <el-tag round type="success">
+          在线 {{ onlineNodeCount }} 台
+        </el-tag>
+        <el-tag round type="info">
+          离线 {{ offlineNodeCount }} 台
+        </el-tag>
         <el-tag round :type="graphData.links.length > 0 ? 'success' : 'info'">
           {{ graphData.links.length > 0 ? `${graphData.links.length} 条链路` : '无链路' }}
         </el-tag>

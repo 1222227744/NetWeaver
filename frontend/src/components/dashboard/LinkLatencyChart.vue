@@ -75,6 +75,20 @@ const formatOptionalText = (value: string | number | null | undefined) => {
   return String(value)
 }
 
+const formatPublicAddress = (node: DashboardNode | null) => {
+  if (!node) {
+    return '未上报'
+  }
+
+  const publicIp = formatOptionalText(node.public_ip)
+
+  if (node.public_port === null || node.public_port === undefined || node.public_port === 0) {
+    return publicIp
+  }
+
+  return `${publicIp}:${node.public_port}`
+}
+
 const formatStatusText = (status: DashboardNode['status'] | undefined) => {
   if (status === 'online') {
     return '在线'
@@ -85,6 +99,14 @@ const formatStatusText = (status: DashboardNode['status'] | undefined) => {
   }
 
   return '未知'
+}
+
+const formatLastSeen = (timestamp?: number) => {
+  if (!timestamp) {
+    return '未上报'
+  }
+
+  return new Date(timestamp * 1000).toLocaleString('zh-CN', { hour12: false })
 }
 
 const getThemeValue = (name: string, fallback: string) => {
@@ -353,16 +375,24 @@ onBeforeUnmount(() => {
           <p class="mt-1 text-slate-700">{{ props.node.virtual_ip }}</p>
         </div>
         <div class="rounded-2xl bg-slate-50 px-3 py-2">
-          <p class="text-xs text-slate-400">公网 IP</p>
-          <p class="mt-1 text-slate-700">{{ formatOptionalText(props.node.public_ip) }}</p>
+          <p class="text-xs text-slate-400">公网地址</p>
+          <p class="mt-1 text-slate-700">{{ formatPublicAddress(props.node) }}</p>
         </div>
         <div class="rounded-2xl bg-slate-50 px-3 py-2">
           <p class="text-xs text-slate-400">NAT 类型</p>
           <p class="mt-1 text-slate-700">{{ props.node.nat_type }}</p>
         </div>
         <div class="rounded-2xl bg-slate-50 px-3 py-2">
+          <p class="text-xs text-slate-400">当前状态</p>
+          <p class="mt-1 text-slate-700">{{ formatStatusText(props.node.status) }}</p>
+        </div>
+        <div class="rounded-2xl bg-slate-50 px-3 py-2">
           <p class="text-xs text-slate-400">已连接邻居</p>
           <p class="mt-1 text-slate-700">{{ props.node.connected_peers }}</p>
+        </div>
+        <div class="rounded-2xl bg-slate-50 px-3 py-2">
+          <p class="text-xs text-slate-400">最后心跳</p>
+          <p class="mt-1 text-slate-700">{{ formatLastSeen(props.node.last_seen) }}</p>
         </div>
       </div>
 

@@ -8,6 +8,158 @@
 - 当前主页面入口：[src/views/AdminDashboardPage.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/views/AdminDashboardPage.vue)
 - 当前布局骨架：[src/components/layout/AdminShell.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/layout/AdminShell.vue)
 
+## 当前联调配置（请优先看这一节）
+
+这部分写的是“现在这份前端代码应该怎么接真实后端”，优先级高于下面按时间顺序记录的历史日志。
+
+当前已经不再保留 `test/` Mock 后端目录，也不再建议通过本地假接口联调。现在默认就是对真实后端联调。
+
+### 1. 前端到底在哪里改后端地址
+
+优先看这几个文件：
+
+- [.env.development.local](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/.env.development.local)
+  - 这是你本机开发时最常改的地方
+- [.env.example](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/.env.example)
+  - 这是环境变量模板，用来告诉别人应该填哪些项
+- [vite.config.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/vite.config.ts)
+  - 这里读取环境变量，并把 `/api` 代理到你配置的后端地址
+- [src/api/dashboard.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/api/dashboard.ts)
+  - 这里定义了 axios 的 `baseURL` 和所有控制台接口
+
+以后如果你想问“前端现在请求的是哪个后端”，先看 `.env.development.local`，不要先去源码里全局搜索 `axios`。
+
+### 2. 最常用的联调方式：走 Vite 代理
+
+这是当前最推荐的开发联调方式。优点是：
+
+- 前端源码里继续写 `/api/v1/...`
+- 浏览器不会直接跨域请求后端
+- 只需要改环境变量，不需要改组件代码
+
+请在 [.env.development.local](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/.env.development.local) 里这样写：
+
+```env
+VITE_API_BASE_URL=
+VITE_PROXY_TARGET=http://127.0.0.1:8080
+```
+
+含义是：
+
+- `VITE_API_BASE_URL` 留空
+  - 浏览器会继续请求相对路径 `/api/...`
+- `VITE_PROXY_TARGET` 指向真实后端
+  - Vite 开发服务器会把 `/api/...` 转发给这个地址
+
+本机场景示例：
+
+```env
+VITE_API_BASE_URL=
+VITE_PROXY_TARGET=http://127.0.0.1:8080
+```
+
+校园网 / 局域网联调示例：
+
+```env
+VITE_API_BASE_URL=
+VITE_PROXY_TARGET=http://192.168.1.23:8080
+```
+
+这里的 `192.168.1.23:8080` 就替换成你队友机器上后端服务真实监听的 IP 和端口。
+
+### 3. 另一种方式：浏览器直接请求后端
+
+如果你明确需要让浏览器直接访问后端，而不是通过 Vite 代理，那么可以这样写：
+
+```env
+VITE_API_BASE_URL=http://192.168.1.23:8080
+VITE_PROXY_TARGET=http://192.168.1.23:8080
+```
+
+这时：
+
+- axios 会直接请求 `http://192.168.1.23:8080/api/v1/...`
+- 是否能成功，取决于后端是否正确配置了 CORS
+
+如果你只是普通开发联调，仍然建议优先走上一节的代理模式。
+
+### 4. 修改环境变量后要做什么
+
+`.env.*` 文件不是热更新的。也就是说：
+
+1. 先修改 `.env.development.local`
+2. 停掉当前的 `npm run dev`
+3. 重新执行 `npm run dev`
+
+只有这样新地址才会真正生效。
+
+### 5. 当前联调需要后端具备哪些接口
+
+前端当前严格按 `docs/NetWeaver-API-v1.8.md` 联调，已经实际使用到这些接口：
+
+- `POST /api/v1/auth/login`
+- `GET /api/v1/dashboard/stats`
+- `GET /api/v1/dashboard/nodes`
+- `GET /api/v1/dashboard/edges`
+- `GET /api/v1/dashboard/nodes/{node_id}/metrics?target_id={target_id}&time_range=1h|12h|24h`
+
+并且当前前端已经依赖这些规则：
+
+- 登录成功后，后端必须返回 JWT
+- 后续 `dashboard/*` 接口必须接受 `Authorization: Bearer <jwt>`
+- `nodes` 返回的是全部节点，不只是在线节点
+- `edges` 只返回真实已建链的边
+- `metrics` 允许返回空数组 `[]`，前端会显示“暂无链路数据”
+
+### 6. 当前最直接的运行与验证命令
+
+首次安装依赖：
+
+```powershell
+cd frontend
+npm install
+```
+
+开发联调：
+
+```powershell
+cd frontend
+npm run dev
+```
+
+生产构建验证：
+
+```powershell
+cd frontend
+npm run build
+```
+
+本地预览构建产物：
+
+```powershell
+cd frontend
+npm run preview
+```
+
+### 7. 这几个文件各自负责什么
+
+- [.env.development.local](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/.env.development.local)
+  - 改“你开发机现在要连哪个后端”
+- [.env.example](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/.env.example)
+  - 给队友看的模板，不是日常直接运行文件
+- [vite.config.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/vite.config.ts)
+  - 定义 `/api` 代理规则，决定相对路径到底被转发到哪里
+- [src/api/dashboard.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/api/dashboard.ts)
+  - 统一写接口路径、请求参数、响应类型、JWT 自动携带
+
+## 阅读说明
+
+下面的“变更记录”是按时间顺序写的。
+
+- 越新的记录，优先级越高
+- 较新的开发条目可能会覆盖较早时期的临时方案
+- 如果历史记录里出现了旧的 Mock 流程，请以本节上面的“当前联调配置”为准
+
 ## 新手接手顺序
 
 如果是刚学 Vue 的同学接手，建议不要一上来就随机点文件，而是按下面顺序读：
@@ -645,7 +797,7 @@ npm run preview
 
 后端登录接口未完成时的本地测试办法：
 
-- 启动根目录的 [test/mock-backend.js](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/test/mock-backend.js)
+- 当时曾启动根目录 `test/mock-backend.js` 做临时联调（该文件现已删除）
 - 前端保持正常登录流程，不再通过环境变量绕开登录
 - 模拟账号为 `admin / admin123`
 - 模拟后端会返回 JWT，并校验 Dashboard 接口的 `Authorization` 请求头
@@ -666,7 +818,13 @@ npm run preview
 - `GET /api/v1/dashboard/nodes/{node_id}/metrics` 必须要求 `target_id`，且不能把 `node_id == target_id` 当作有效请求
 - metrics 为空数组是正常空态，前端会展示空图；有数据时会按 `timestamp` 升序画真实延迟曲线
 
-### 2026-05-24 第十次开发：新增 Mock 后端并移除登录绕过开关
+### 2026-05-24 第十次开发：新增 Mock 后端并移除登录绕过开关（历史方案，相关目录已删除）
+
+说明：
+
+- 这一阶段曾临时使用根目录 `test/` 做本地模拟联调
+- `test/` 目录已经在后续清理中删除
+- 下面这段记录只用于追踪当时做过什么，不再作为当前联调方式
 
 目标：
 
@@ -676,7 +834,7 @@ npm run preview
 
 本次具体改动：
 
-- 新增 [test/mock-backend.js](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/test/mock-backend.js)
+- 历史上曾新增 `test/mock-backend.js`（现已删除）
   - 使用 Node.js 原生 `http` 模块
   - 不需要安装依赖
   - 不做持久化
@@ -687,7 +845,7 @@ npm run preview
   - 支持 `GET /api/v1/dashboard/edges`
   - 支持 `GET /api/v1/dashboard/nodes/{node_id}/metrics`
   - Dashboard 接口会校验 `Authorization: Bearer <token>`
-- 新增 [test/README.md](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/test/README.md)
+- 历史上曾新增 `test/README.md`（现已删除）
   - 记录启动命令、登录账号和前端联调方法
 - 修改 [src/api/dashboard.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/api/dashboard.ts)
   - 删除 `VITE_ENABLE_DASHBOARD_AUTH` 相关逻辑
@@ -701,7 +859,7 @@ npm run preview
   - 删除开发预览模式分支
   - 退出按钮始终走清空登录态流程
 
-本地测试命令：
+当时的本地测试命令（现已废弃）：
 
 ```powershell
 node test/mock-backend.js
@@ -835,3 +993,50 @@ password: admin123
 - `npx vue-tsc --noEmit` 已通过
 - `npx vite build --configLoader native --outDir .codex-build-check` 已通过
 - `.codex-build-check` 为一次性验证目录，验证后已删除
+
+### 2026-05-30 第十三次开发：补齐离线节点展示、链路实时刷新与联调说明
+
+目标：
+
+- 继续按 `docs/NetWeaver-API-v1.8.md` 收口 Dashboard 前端
+- 修正“节点掉线后直接从前端消失”的问题，让 `offline` 状态能被明确看到
+- 修正“同一条链路长时间停留时，折线图只读缓存不再刷新”的问题
+- 把真实联调时该改哪里、怎么改、改完要不要重启，全部写进 README
+
+本次具体改动：
+
+- 修改 [src/components/dashboard/OnlineNodeTable.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/OnlineNodeTable.vue)
+  - `allNodes` 明确作为“全部节点”使用，不再只拿在线节点参与主体渲染
+  - 节点表格从“在线节点”改为“节点列表”，现在会同时展示在线和离线节点
+  - 新增 `offlineNodes`、`hasOnlyOfflineNodes` 等计算状态
+  - 当当前没有在线节点、但后端仍返回离线节点时，页面不再空白，而是保留离线节点供排查
+  - 已选中链路在轮询刷新时，`metrics` 现在会静默强制刷新，而不是长期复用旧缓存
+  - 静默刷新时若本地已有旧曲线，会先继续显示旧曲线，再在后台取新数据，避免每 5 秒闪烁一次“加载中”
+- 修改 [src/components/dashboard/NodeRelationGraph.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/NodeRelationGraph.vue)
+  - 关系图数据源从“仅在线节点”改为“全部节点”
+  - 离线节点现在会保留在图里，并通过灰色样式和状态字段体现 `offline`
+  - 图标题右侧新增总数、在线数、离线数标签，方便直接核对后端状态同步结果
+- 修改 [src/components/dashboard/LinkLatencyChart.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/LinkLatencyChart.vue)
+  - 节点悬浮卡片新增“公网地址”“当前状态”“最后心跳”
+  - 为了适配新增字段，节点卡片的定位高度估算同步调整
+- 修改 [README.md](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/README.md)
+  - 顶部新增“当前联调配置（请优先看这一节）”
+  - 明确说明现在不再依赖 `test/` Mock 后端目录
+  - 明确说明开发联调时优先修改 `.env.development.local`
+  - 明确说明 `VITE_API_BASE_URL` 与 `VITE_PROXY_TARGET` 的区别
+  - 补充本机联调、校园网 / 局域网联调、直接请求后端三种配置示例
+  - 补充 `npm install / npm run dev / npm run build / npm run preview` 的使用场景
+  - 补充“改完环境变量后需要重启开发服务器”这一容易漏掉的步骤
+
+当前页面效果变化：
+
+- 节点掉线后，只要后端 `nodes` 接口把该节点状态改成 `offline`，前端就会继续把它显示在图和表格里
+- 与离线节点相关的真实边仍然只依赖 `edges` 接口；只要后端移除边，前端关系图会同步断开
+- 悬停同一条链路较长时间时，折线图数据会随轮询静默更新，不再长期停在旧缓存
+
+验证结果：
+
+- `npx vue-tsc --noEmit` 已通过
+- `npm run build` 的 TypeScript 与 Vite transform 阶段已通过，但当前机器仍然无法写入 `frontend/dist/assets`，报错为 `拒绝访问`
+- `npx vite build --configLoader native --outDir .codex-build-check` 已通过，用于确认本轮源码可以完整生产构建
+- `.codex-build-check` 为一次性验证目录，验证后已立即删除，没有作为遗留目录保留
