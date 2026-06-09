@@ -7,15 +7,18 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
 	goruntime "runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"netweaver-backend/internal/node/client"
+	nodetun "netweaver-backend/internal/node/tun"
 	"netweaver-backend/pkg/config"
 	"netweaver-backend/pkg/protocol"
 )
@@ -31,6 +34,9 @@ type Config struct {
 	STUNServers       []string
 	DataListenAddr    string
 	PSK               string
+	TUNEnabled        bool
+	TUNName           string
+	TUNBufferSize     int
 	HeartbeatInterval time.Duration
 	PeerInterval      time.Duration
 }
@@ -42,6 +48,9 @@ type Agent struct {
 	virtualIP string
 	dataConn  *net.UDPConn
 	linker    *linkManager
+	tunMu     sync.RWMutex
+	tunDev    io.ReadWriteCloser
+	tunName   string
 }
 
 func Run(ctx context.Context, args []string) error {
@@ -56,6 +65,9 @@ func Run(ctx context.Context, args []string) error {
 	stunServers := fs.String("stun-servers", config.DefaultSTUNServers, "comma-separated STUN endpoints")
 	dataListenAddr := fs.String("data-addr", "0.0.0.0:0", "UDP address used for STUN, P2P punch and data plane")
 	psk := fs.String("psk", config.NodePSK(), "node pre-shared key for controller node APIs")
+	tunEnabled := fs.Bool("tun", true, "enable TUN data plane in run mode")
+	tunName := fs.String("tun-name", config.DefaultTUNName, "TUN interface used for data plane")
+	tunBufferSize := fs.Int("tun-buf", 65535, "TUN packet read buffer size")
 	heartbeatInterval := fs.Duration("interval", config.DefaultHeartbeatInterval, "heartbeat interval")
 	peerInterval := fs.Duration("peer-interval", config.DefaultHeartbeatInterval, "peer sync interval")
 	if err := fs.Parse(args); err != nil {
@@ -67,6 +79,9 @@ func Run(ctx context.Context, args []string) error {
 	}
 	if *peerInterval <= 0 {
 		return fmt.Errorf("invalid -peer-interval: %s", peerInterval.String())
+	}
+	if *tunBufferSize <= 0 {
+		return fmt.Errorf("invalid -tun-buf: %d", *tunBufferSize)
 	}
 
 	resolvedHostname := strings.TrimSpace(*hostname)
@@ -95,6 +110,9 @@ func Run(ctx context.Context, args []string) error {
 		STUNServers:       splitCSV(*stunServers),
 		DataListenAddr:    strings.TrimSpace(*dataListenAddr),
 		PSK:               strings.TrimSpace(*psk),
+		TUNEnabled:        *tunEnabled,
+		TUNName:           strings.TrimSpace(*tunName),
+		TUNBufferSize:     *tunBufferSize,
 		HeartbeatInterval: *heartbeatInterval,
 		PeerInterval:      *peerInterval,
 	})
@@ -120,6 +138,12 @@ func New(cfg Config) *Agent {
 	}
 	if cfg.PSK == "" {
 		cfg.PSK = config.NodePSK()
+	}
+	if cfg.TUNName == "" {
+		cfg.TUNName = config.DefaultTUNName
+	}
+	if cfg.TUNBufferSize <= 0 {
+		cfg.TUNBufferSize = 65535
 	}
 
 	agent := &Agent{
@@ -150,6 +174,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		a.detectNAT(ctx)
 		go a.linker.readLoop(ctx, a.dataConn)
 		go a.linker.probeLoop(ctx)
+		a.startTUNDataPlane(ctx)
 	}
 
 	if err := a.sendHeartbeat(ctx); err != nil {
@@ -175,6 +200,79 @@ func (a *Agent) Run(ctx context.Context) error {
 			a.syncPeers(ctx)
 		}
 	}
+}
+
+func (a *Agent) startTUNDataPlane(ctx context.Context) {
+	if !a.cfg.TUNEnabled {
+		log.Printf("TUN data plane disabled")
+		return
+	}
+	if a.dataConn == nil {
+		log.Printf("TUN data plane disabled: data socket is not open")
+		return
+	}
+
+	device, err := nodetun.Open(nodetun.OpenOptions{
+		Name: a.cfg.TUNName,
+	})
+	if err != nil {
+		log.Printf("TUN data plane disabled: %v", err)
+		return
+	}
+
+	a.tunMu.Lock()
+	a.tunDev = device.ReadWriteCloser
+	a.tunName = device.Name
+	a.tunMu.Unlock()
+
+	log.Printf("TUN data plane enabled: ifname=%s virtual_ip=%s", device.Name, a.virtualIP)
+	log.Printf("TUN setup reminder: sudo ip addr add %s/16 dev %s && sudo ip link set %s up", a.virtualIP, device.Name, device.Name)
+
+	go func() {
+		<-ctx.Done()
+		_ = device.Close()
+	}()
+	go a.tunReadLoop(ctx, device)
+}
+
+func (a *Agent) tunReadLoop(ctx context.Context, device *nodetun.Device) {
+	buf := make([]byte, a.cfg.TUNBufferSize)
+	for {
+		n, err := device.Read(buf)
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				log.Printf("TUN read failed: %v", err)
+				return
+			}
+		}
+		if n == 0 {
+			continue
+		}
+
+		packet := make([]byte, n)
+		copy(packet, buf[:n])
+		if err := a.linker.sendData(packet); err != nil {
+			log.Printf("drop outbound TUN packet: %v", err)
+		}
+	}
+}
+
+func (a *Agent) writeTUN(packet []byte) error {
+	a.tunMu.RLock()
+	dev := a.tunDev
+	name := a.tunName
+	a.tunMu.RUnlock()
+
+	if dev == nil {
+		return fmt.Errorf("TUN data plane is not open")
+	}
+	if _, err := dev.Write(packet); err != nil {
+		return fmt.Errorf("write TUN %s: %w", name, err)
+	}
+	return nil
 }
 
 func (a *Agent) register(ctx context.Context) (protocol.RegisterNodeResponse, error) {

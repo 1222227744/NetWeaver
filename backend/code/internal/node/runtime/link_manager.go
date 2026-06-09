@@ -149,6 +149,11 @@ func (m *linkManager) readLoop(ctx context.Context, conn *net.UDPConn) {
 		}
 
 		switch packet.messageType {
+		case messageTypeData:
+			m.ensureLink(peer, linkTypeFromPacket(m.agent.nodeID, peer, packet.sessionID))
+			if err := m.agent.writeTUN(packet.payload); err != nil {
+				log.Printf("write inbound data packet failed: peer=%s err=%v", peer.TargetNodeID, err)
+			}
 		case messageTypePunchProbe:
 			if err := m.sendControl(peer, remoteAddr, messageTypePunchAck, packet.sessionID); err != nil {
 				log.Printf("send punch ack failed: peer=%s err=%v", peer.TargetNodeID, err)
@@ -159,7 +164,7 @@ func (m *linkManager) readLoop(ctx context.Context, conn *net.UDPConn) {
 			m.setLink(peer, protocol.LinkTypeP2P, 0)
 			m.notifyPunchAck(peer.TargetNodeID)
 		case messageTypeKeepalive:
-			m.ensureLink(peer, linkTypeFromPacket(peer, packet.sessionID))
+			m.ensureLink(peer, linkTypeFromPacket(m.agent.nodeID, peer, packet.sessionID))
 			if err := m.sendControl(peer, remoteAddr, messageTypeKeepaliveAck, packet.sessionID); err != nil {
 				log.Printf("send keepalive ack failed: peer=%s err=%v", peer.TargetNodeID, err)
 			}
@@ -263,6 +268,40 @@ func (m *linkManager) tryP2P(ctx context.Context, peer protocol.PeerInfo) (float
 	}
 
 	return 0, false
+}
+
+func (m *linkManager) sendData(payload []byte) error {
+	if m.agent.dataConn == nil {
+		return fmt.Errorf("data socket is not open")
+	}
+
+	dstVirtualIP, ok := ipv4Dst(payload)
+	if !ok {
+		return fmt.Errorf("unsupported outbound packet: expected IPv4 packet")
+	}
+	if dstVirtualIP == m.agent.virtualIP {
+		return fmt.Errorf("drop local outbound packet to self: %s", dstVirtualIP)
+	}
+
+	link, ok := m.linkForVirtualIP(dstVirtualIP)
+	if !ok {
+		return fmt.Errorf("no active link for destination virtual ip %s", dstVirtualIP)
+	}
+
+	remoteAddr, sessionID, ok := m.remoteAddrForLink(link)
+	if !ok {
+		return fmt.Errorf("no usable remote address for destination virtual ip %s", dstVirtualIP)
+	}
+
+	data, err := encodeNetWeaverPacket(messageTypeData, sessionID, m.agent.virtualIP, link.Peer.TargetVirtualIP, payload)
+	if err != nil {
+		return err
+	}
+
+	if _, err := m.agent.dataConn.WriteToUDP(data, remoteAddr); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (m *linkManager) sendControl(peer protocol.PeerInfo, remoteAddr *net.UDPAddr, messageType byte, sessionID uint32) error {
@@ -383,6 +422,26 @@ func (m *linkManager) peerBySourceVirtualIP(virtualIP string) (protocol.PeerInfo
 	return peer, ok
 }
 
+func (m *linkManager) linkForVirtualIP(virtualIP string) (peerLink, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	nodeID, ok := m.peerByVirtualIP[virtualIP]
+	if !ok {
+		return peerLink{}, false
+	}
+
+	link, ok := m.links[nodeID]
+	if !ok {
+		return peerLink{}, false
+	}
+	if time.Since(link.LastSeen) > 3*m.agent.cfg.PeerInterval {
+		delete(m.links, nodeID)
+		return peerLink{}, false
+	}
+	return link, true
+}
+
 func (m *linkManager) linkSnapshot() []peerLink {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -481,8 +540,8 @@ func relayRemoteAddr(localNodeID string, peer protocol.PeerInfo) (*net.UDPAddr, 
 	return remoteAddr, sessionID, true
 }
 
-func linkTypeFromPacket(peer protocol.PeerInfo, sessionID uint32) string {
-	if sessionID != 0 && peer.RelaySessionID == sessionID {
+func linkTypeFromPacket(localNodeID string, peer protocol.PeerInfo, sessionID uint32) string {
+	if sessionID != 0 && (peer.RelaySessionID == sessionID || deterministicRelaySessionID(localNodeID, peer.TargetNodeID) == sessionID) {
 		return protocol.LinkTypeRelay
 	}
 	return protocol.LinkTypeP2P
@@ -520,4 +579,18 @@ func deterministicRelaySessionID(a string, b string) uint32 {
 		return 1
 	}
 	return sessionID
+}
+
+func ipv4Dst(packet []byte) (string, bool) {
+	if len(packet) < 20 {
+		return "", false
+	}
+	if packet[0]>>4 != 4 {
+		return "", false
+	}
+	ihl := int(packet[0]&0x0f) * 4
+	if ihl < 20 || len(packet) < ihl {
+		return "", false
+	}
+	return net.IPv4(packet[16], packet[17], packet[18], packet[19]).String(), true
 }
