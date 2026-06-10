@@ -39,15 +39,11 @@ const handleSelect = (menuKey: string) => {
     <div class="pointer-events-none absolute -right-10 top-8 h-28 w-28 rounded-full bg-cyan-300/15 blur-3xl" />
     <div class="pointer-events-none absolute -left-6 bottom-20 h-24 w-24 rounded-full bg-emerald-300/10 blur-3xl" />
 
-    <!-- 品牌区：后续可以替换为公司 Logo、租户切换器或当前站点信息 -->
     <section class="relative z-10 rounded-[1.5rem] border border-white/10 bg-white/5 p-4 backdrop-blur">
       <span class="inline-flex rounded-full bg-white/10 px-3 py-1 text-xs tracking-[0.22em] text-slate-300">
         NETWEAVER
       </span>
       <h2 class="mt-4 text-2xl font-semibold tracking-[0.06em]">管理后台</h2>
-      <p class="mt-2 text-sm leading-6 text-slate-300/80">
-        这里保留为全局导航入口，你后续接入真实菜单、权限和路由时，可以直接替换下面的菜单数据。
-      </p>
     </section>
 
     <!--
@@ -92,15 +88,6 @@ const handleSelect = (menuKey: string) => {
         </section>
       </div>
     </el-scrollbar>
-
-    <section class="relative z-10 mt-4 rounded-[1.5rem] border border-emerald-200/10 bg-white/5 p-4">
-      <p class="text-sm font-medium text-slate-200">当前环境</p>
-      <div class="mt-3 flex items-center gap-2">
-        <el-tag round type="success">开发中</el-tag>
-        <!-- 这是底部的小提示块，你以后也可以换成版本号、构建时间、登录信息 -->
-        <span class="text-xs text-slate-400">适合作为后台框架起点继续扩展</span>
-      </div>
-    </section>
   </aside>
 </template>
 

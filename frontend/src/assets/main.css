@@ -9,14 +9,88 @@
 :root {
   /* 这里放全局的基础视觉设置，整个页面都会继承。
      可以把 :root 理解成“整个网页的默认设定中心”。 */
-  color: #0f172a;
-  background-color: #f4f7fb;
+  --theme-hue: 174;
+  --cursor-x: 50vw;
+  --cursor-y: 50vh;
+
+  /* 下面这些 --app-* 都是本项目自己的主题变量。
+     顶部主题滑条只改变 --theme-hue，其他颜色会跟着自动推导出来。
+     这样主题色是连续变化的，不是几个固定档位。 */
+  --app-primary: hsl(var(--theme-hue) 72% 40%);
+  --app-primary-strong: hsl(var(--theme-hue) 76% 28%);
+  --app-primary-soft: hsl(var(--theme-hue) 78% 93% / 0.92);
+  --app-primary-border: hsl(var(--theme-hue) 78% 56% / 0.35);
+  --app-primary-glow: hsl(var(--theme-hue) 86% 56% / 0.24);
+  --app-primary-glow-strong: hsl(var(--theme-hue) 88% 54% / 0.42);
+
+  --app-bg-base: hsl(var(--theme-hue) 42% 97%);
+  --app-bg-aura-left: hsl(var(--theme-hue) 78% 56% / 0.18);
+  --app-bg-aura-right: hsl(calc(var(--theme-hue) + 34) 82% 56% / 0.13);
+  --app-panel-bg: hsl(0 0% 100% / 0.86);
+  --app-panel-bg-solid: hsl(0 0% 100%);
+  --app-inner-bg: hsl(var(--theme-hue) 45% 98% / 0.84);
+  --app-control-bg: hsl(0 0% 100% / 0.62);
+  --app-panel-border: hsl(var(--theme-hue) 34% 74% / 0.44);
+  --app-panel-shadow: 0 24px 56px -34px hsl(var(--theme-hue) 60% 18% / 0.34);
+  --app-text: #0f172a;
+  --app-text-soft: #334155;
+  --app-text-muted: #64748b;
+  --cursor-blend-mode: multiply;
+
+  /* Element Plus 会读取 --el-* 变量。
+     这里把它们接到我们的主题变量上，按钮、输入框、表格会跟着换色。 */
+  --el-color-primary: var(--app-primary);
+  --el-color-primary-light-3: hsl(var(--theme-hue) 68% 58%);
+  --el-color-primary-light-5: hsl(var(--theme-hue) 72% 74%);
+  --el-color-primary-light-7: hsl(var(--theme-hue) 76% 86%);
+  --el-color-primary-light-9: hsl(var(--theme-hue) 78% 94%);
+  --el-color-primary-dark-2: var(--app-primary-strong);
+  --el-bg-color: var(--app-panel-bg-solid);
+  --el-bg-color-overlay: var(--app-panel-bg-solid);
+  --el-text-color-primary: var(--app-text);
+  --el-text-color-regular: var(--app-text-soft);
+  --el-text-color-secondary: var(--app-text-muted);
+  --el-border-color: var(--app-panel-border);
+  --el-border-color-light: var(--app-panel-border);
+  --el-fill-color-blank: var(--app-panel-bg-solid);
+  --el-fill-color-light: var(--app-inner-bg);
+
+  color: var(--app-text);
+  background-color: var(--app-bg-base);
   font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   line-height: 1.5;
   font-weight: 400;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+:root[data-theme-mode='dim'] {
+  --app-primary: hsl(var(--theme-hue) 78% 58%);
+  --app-primary-strong: hsl(var(--theme-hue) 88% 76%);
+  --app-primary-soft: hsl(var(--theme-hue) 58% 24% / 0.56);
+  --app-primary-border: hsl(var(--theme-hue) 74% 64% / 0.38);
+  --app-primary-glow: hsl(var(--theme-hue) 88% 58% / 0.26);
+  --app-primary-glow-strong: hsl(var(--theme-hue) 94% 62% / 0.48);
+
+  --app-bg-base: hsl(var(--theme-hue) 30% 8%);
+  --app-bg-aura-left: hsl(var(--theme-hue) 90% 58% / 0.2);
+  --app-bg-aura-right: hsl(calc(var(--theme-hue) + 38) 86% 60% / 0.16);
+  --app-panel-bg: hsl(var(--theme-hue) 24% 13% / 0.78);
+  --app-panel-bg-solid: hsl(var(--theme-hue) 24% 13%);
+  --app-inner-bg: hsl(var(--theme-hue) 25% 10% / 0.82);
+  --app-control-bg: hsl(var(--theme-hue) 26% 18% / 0.66);
+  --app-panel-border: hsl(var(--theme-hue) 48% 62% / 0.24);
+  --app-panel-shadow: 0 28px 70px -36px hsl(var(--theme-hue) 90% 3% / 0.88);
+  --app-text: #e5edf6;
+  --app-text-soft: #cbd5e1;
+  --app-text-muted: #94a3b8;
+  --cursor-blend-mode: screen;
+
+  --el-color-primary-light-3: hsl(var(--theme-hue) 78% 66%);
+  --el-color-primary-light-5: hsl(var(--theme-hue) 72% 48%);
+  --el-color-primary-light-7: hsl(var(--theme-hue) 58% 28%);
+  --el-color-primary-light-9: hsl(var(--theme-hue) 42% 18%);
 }
 
 * {
@@ -38,9 +112,13 @@ body {
   /* 页面大背景：两层浅色光晕 + 底色。
      这样后台页面不会是一整块死白，看起来会更柔和。 */
   background:
-    radial-gradient(circle at top left, rgba(37, 141, 125, 0.16), transparent 28%),
-    radial-gradient(circle at top right, rgba(14, 116, 144, 0.12), transparent 24%),
-    #f4f7fb;
+    radial-gradient(circle at top left, var(--app-bg-aura-left), transparent 30%),
+    radial-gradient(circle at top right, var(--app-bg-aura-right), transparent 26%),
+    var(--app-bg-base);
+  color: var(--app-text);
+  transition:
+    background 0.55s ease,
+    color 0.45s ease;
 }
 
 button,
@@ -57,11 +135,141 @@ select {
      以后页面里想做一个“面板/卡片”，直接复用这个类即可。
      当前项目里的顶部栏、统计卡片、表格外层，都是沿用这套外观。 */
   .panel-surface {
-    @apply rounded-[1.75rem] border border-slate-200/70 bg-white/85 shadow-panel backdrop-blur;
+    @apply rounded-[1.75rem] border backdrop-blur;
+    background: var(--app-panel-bg);
+    border-color: var(--app-panel-border);
+    box-shadow: var(--app-panel-shadow);
+    transition:
+      background-color 0.45s ease,
+      border-color 0.45s ease,
+      box-shadow 0.45s ease,
+      color 0.45s ease;
   }
 
   /* 常用的小标题外观：字母间距大、颜色浅、适合做模块标题。 */
   .panel-heading {
-    @apply text-xs font-semibold uppercase tracking-[0.28em] text-slate-400;
+    @apply text-xs font-semibold uppercase tracking-[0.28em];
+    color: var(--app-text-muted);
+  }
+}
+
+/* 这些覆盖规则负责把原来写死的 Tailwind 浅色样式接入主题变量。
+   不这样做的话，暗色模式下卡片已经变暗，但文字仍可能保持 slate-900，阅读会很吃力。 */
+.app-theme-shell {
+  color: var(--app-text);
+}
+
+.app-theme-shell .panel-surface .text-slate-900 {
+  color: var(--app-text);
+}
+
+.app-theme-shell .panel-surface .text-slate-700 {
+  color: var(--app-text-soft);
+}
+
+.app-theme-shell .panel-surface .text-slate-500,
+.app-theme-shell .panel-surface .text-slate-400 {
+  color: var(--app-text-muted);
+}
+
+.app-theme-shell .panel-surface .border-slate-200,
+.app-theme-shell .panel-surface .border-slate-200\/70,
+.app-theme-shell .panel-surface .border-dashed {
+  border-color: var(--app-panel-border);
+}
+
+.app-theme-shell .panel-surface .bg-white,
+.app-theme-shell .panel-surface .bg-slate-50 {
+  background-color: var(--app-inner-bg);
+}
+
+.app-theme-shell .panel-surface .bg-brand-50 {
+  background-color: var(--app-primary-soft);
+}
+
+.app-theme-shell .panel-surface .text-brand-700 {
+  color: var(--app-primary-strong);
+}
+
+.app-theme-shell .el-button--primary {
+  --el-button-bg-color: var(--app-primary);
+  --el-button-border-color: var(--app-primary);
+  --el-button-hover-bg-color: var(--app-primary-strong);
+  --el-button-hover-border-color: var(--app-primary-strong);
+}
+
+.app-theme-shell .el-table {
+  --el-table-bg-color: var(--app-panel-bg-solid);
+  --el-table-tr-bg-color: var(--app-panel-bg-solid);
+  --el-table-header-bg-color: var(--app-inner-bg);
+  --el-table-row-hover-bg-color: var(--app-primary-soft);
+  --el-table-border-color: var(--app-panel-border);
+  --el-table-text-color: var(--app-text-soft);
+  --el-table-header-text-color: var(--app-text);
+}
+
+.app-theme-shell .el-input,
+.app-theme-shell .el-radio-button,
+.app-theme-shell .el-tag {
+  transition:
+    color 0.45s ease,
+    background-color 0.45s ease,
+    border-color 0.45s ease;
+}
+
+/* 全局鼠标光晕。
+   它只负责视觉提示，不拦截鼠标事件，所以不会影响点击、拖拽、输入。 */
+.cursor-effects {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  opacity: 0;
+  mix-blend-mode: var(--cursor-blend-mode);
+  transition: opacity 0.18s ease;
+}
+
+.cursor-effects.is-visible {
+  opacity: 0.58;
+}
+
+.cursor-effects__glow,
+.cursor-effects__ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-radius: 999px;
+  will-change: transform;
+}
+
+.cursor-effects__glow {
+  width: 2.25rem;
+  height: 2.25rem;
+  background: radial-gradient(circle, var(--app-primary-glow-strong), var(--app-primary-glow) 32%, transparent 62%);
+  filter: blur(1.5px);
+  transform: translate3d(var(--cursor-x), var(--cursor-y), 0) translate(-50%, -50%);
+}
+
+.cursor-effects__ring {
+  width: 0.72rem;
+  height: 0.72rem;
+  border: 1px solid var(--app-primary);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 0 4px var(--app-primary-glow-strong);
+  transform: translate3d(var(--cursor-x), var(--cursor-y), 0) translate(-50%, -50%);
+}
+
+@media (pointer: coarse) {
+  .cursor-effects {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body,
+  .panel-surface,
+  .cursor-effects {
+    transition: none;
   }
 }

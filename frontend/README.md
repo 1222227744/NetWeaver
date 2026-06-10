@@ -8,6 +8,158 @@
 - 当前主页面入口：[src/views/AdminDashboardPage.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/views/AdminDashboardPage.vue)
 - 当前布局骨架：[src/components/layout/AdminShell.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/layout/AdminShell.vue)
 
+## 当前联调配置（请优先看这一节）
+
+这部分写的是“现在这份前端代码应该怎么接真实后端”，优先级高于下面按时间顺序记录的历史日志。
+
+当前已经不再保留 `test/` Mock 后端目录，也不再建议通过本地假接口联调。现在默认就是对真实后端联调。
+
+### 1. 前端到底在哪里改后端地址
+
+优先看这几个文件：
+
+- [.env.development.local](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/.env.development.local)
+  - 这是你本机开发时最常改的地方
+- [.env.example](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/.env.example)
+  - 这是环境变量模板，用来告诉别人应该填哪些项
+- [vite.config.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/vite.config.ts)
+  - 这里读取环境变量，并把 `/api` 代理到你配置的后端地址
+- [src/api/dashboard.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/api/dashboard.ts)
+  - 这里定义了 axios 的 `baseURL` 和所有控制台接口
+
+以后如果你想问“前端现在请求的是哪个后端”，先看 `.env.development.local`，不要先去源码里全局搜索 `axios`。
+
+### 2. 最常用的联调方式：走 Vite 代理
+
+这是当前最推荐的开发联调方式。优点是：
+
+- 前端源码里继续写 `/api/v1/...`
+- 浏览器不会直接跨域请求后端
+- 只需要改环境变量，不需要改组件代码
+
+请在 [.env.development.local](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/.env.development.local) 里这样写：
+
+```env
+VITE_API_BASE_URL=
+VITE_PROXY_TARGET=http://127.0.0.1:8080
+```
+
+含义是：
+
+- `VITE_API_BASE_URL` 留空
+  - 浏览器会继续请求相对路径 `/api/...`
+- `VITE_PROXY_TARGET` 指向真实后端
+  - Vite 开发服务器会把 `/api/...` 转发给这个地址
+
+本机场景示例：
+
+```env
+VITE_API_BASE_URL=
+VITE_PROXY_TARGET=http://127.0.0.1:8080
+```
+
+校园网 / 局域网联调示例：
+
+```env
+VITE_API_BASE_URL=
+VITE_PROXY_TARGET=http://192.168.1.23:8080
+```
+
+这里的 `192.168.1.23:8080` 就替换成你队友机器上后端服务真实监听的 IP 和端口。
+
+### 3. 另一种方式：浏览器直接请求后端
+
+如果你明确需要让浏览器直接访问后端，而不是通过 Vite 代理，那么可以这样写：
+
+```env
+VITE_API_BASE_URL=http://192.168.1.23:8080
+VITE_PROXY_TARGET=http://192.168.1.23:8080
+```
+
+这时：
+
+- axios 会直接请求 `http://192.168.1.23:8080/api/v1/...`
+- 是否能成功，取决于后端是否正确配置了 CORS
+
+如果你只是普通开发联调，仍然建议优先走上一节的代理模式。
+
+### 4. 修改环境变量后要做什么
+
+`.env.*` 文件不是热更新的。也就是说：
+
+1. 先修改 `.env.development.local`
+2. 停掉当前的 `npm run dev`
+3. 重新执行 `npm run dev`
+
+只有这样新地址才会真正生效。
+
+### 5. 当前联调需要后端具备哪些接口
+
+前端当前严格按 `docs/NetWeaver-API-v1.8.md` 联调，已经实际使用到这些接口：
+
+- `POST /api/v1/auth/login`
+- `GET /api/v1/dashboard/stats`
+- `GET /api/v1/dashboard/nodes`
+- `GET /api/v1/dashboard/edges`
+- `GET /api/v1/dashboard/nodes/{node_id}/metrics?target_id={target_id}&time_range=1h|12h|24h`
+
+并且当前前端已经依赖这些规则：
+
+- 登录成功后，后端必须返回 JWT
+- 后续 `dashboard/*` 接口必须接受 `Authorization: Bearer <jwt>`
+- `nodes` 返回的是全部节点，不只是在线节点
+- `edges` 只返回真实已建链的边
+- `metrics` 允许返回空数组 `[]`，前端会显示“暂无链路数据”
+
+### 6. 当前最直接的运行与验证命令
+
+首次安装依赖：
+
+```powershell
+cd frontend
+npm install
+```
+
+开发联调：
+
+```powershell
+cd frontend
+npm run dev
+```
+
+生产构建验证：
+
+```powershell
+cd frontend
+npm run build
+```
+
+本地预览构建产物：
+
+```powershell
+cd frontend
+npm run preview
+```
+
+### 7. 这几个文件各自负责什么
+
+- [.env.development.local](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/.env.development.local)
+  - 改“你开发机现在要连哪个后端”
+- [.env.example](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/.env.example)
+  - 给队友看的模板，不是日常直接运行文件
+- [vite.config.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/vite.config.ts)
+  - 定义 `/api` 代理规则，决定相对路径到底被转发到哪里
+- [src/api/dashboard.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/api/dashboard.ts)
+  - 统一写接口路径、请求参数、响应类型、JWT 自动携带
+
+## 阅读说明
+
+下面的“变更记录”是按时间顺序写的。
+
+- 越新的记录，优先级越高
+- 较新的开发条目可能会覆盖较早时期的临时方案
+- 如果历史记录里出现了旧的 Mock 流程，请以本节上面的“当前联调配置”为准
+
 ## 新手接手顺序
 
 如果是刚学 Vue 的同学接手，建议不要一上来就随机点文件，而是按下面顺序读：
@@ -574,5 +726,317 @@ npm run preview
 
 当前仍然保留的事实说明：
 
-- 由于接口文档中的 `metrics` 需要 `node_id + target_id`，而当前页面还没有“目标对端节点选择器”，本次先用“当前悬停节点自己的 node_id”去接通真实请求链路
-- 这意味着：如果后端还没有按这个最小调用方式返回数据，前端会正确显示空态，而不是自己伪造一条曲线
+- 这一节记录的是 2026-05-10 当时的阶段性做法
+- 2026-05-24 的第八次开发已经删除“当前节点查询自己”的临时策略，改为悬停或点击真实链路后按 `source -> target` 请求 metrics
+
+### 2026-05-24 第八次开发：按 API v1.8 完成前端收尾闭环
+
+目标：
+
+- 按 `docs/NetWeaver-API-v1.8.md` 收口 Dashboard 前端
+- 增加登录流程，先调用 `POST /api/v1/auth/login` 获取 JWT
+- 让后续 `GET /api/v1/dashboard/*` 请求自动携带 `Authorization: Bearer <jwt>`
+- 删除 metrics 的临时自查调用，改为悬停或点击真实连线后查询 `source -> target`
+- 保留复杂拓扑能力：节点可以继续拖拽，关系图可以展示多节点、多边、P2P/Relay 混合链路
+- 补齐登录过期、后端离线、无在线节点、无真实边、无 metrics 采样点等页面状态
+
+本次具体改动：
+
+- 修改 [src/api/dashboard.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/api/dashboard.ts)
+  - 新增 `DashboardLoginRequest`、`DashboardLoginData`、`DashboardAuthStorage`
+  - 新增 `loginDashboard()`
+  - 新增 `setDashboardAuth()`、`getStoredDashboardAuth()`、`hasValidDashboardAuth()`、`clearDashboardAuth()`
+  - 新增 axios 请求拦截器：访问 `/api/v1/dashboard/*` 时自动加 JWT
+  - 新增 axios 响应拦截器：Dashboard 接口返回 `401` 时清空本地登录态
+  - 将 `ApiResponse<T>` 的 `data` 改为 `T | null`，对齐接口文档中的失败结构
+  - 将 `DashboardStatsData`、`DashboardNode` 扩展到 v1.8 字段
+  - 新增 `DashboardMetricsTimeRange = '1h' | '12h' | '24h'`
+  - `getNodeMetrics()` 现在会在前端阻止 `nodeId === targetId` 的错误调用
+  - `GraphLinkItem` 新增 `id`、`edgeType`，方便关系图事件把具体链路传回父组件
+- 修改 [src/components/dashboard/OnlineNodeTable.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/OnlineNodeTable.vue)
+  - 新增 Dashboard 登录表单
+  - 新增 JWT 登录态判断、退出登录、登录过期处理
+  - 登录成功后再请求 `stats / nodes / edges`
+  - 保留 5 秒轮询刷新，但轮询时不再强制打断页面主要加载状态
+  - 新增链路时间范围选择：`1h`、`12h`、`24h`
+  - 关系图连线悬停或点击后，请求 `GET /api/v1/dashboard/nodes/{source}/metrics?target_id={target}`
+  - 请求失败时区分 401、超时、无响应、普通接口错误
+  - 表格继续只展示在线节点，离线节点只参与统计卡片
+- 修改 [src/components/dashboard/NodeRelationGraph.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/NodeRelationGraph.vue)
+  - 同时支持节点悬停和边悬停
+  - 节点悬停只展示节点基本信息，不请求 metrics
+  - 边悬停或点击会触发 `link-hover` 事件，把 `source / target / edgeType` 回传父组件
+  - 保留 ECharts `graph`、`force` 布局、节点拖拽、缩放和平移
+  - 拓扑图支持多节点、多真实边、P2P/Relay 文字标签
+- 修改 [src/components/dashboard/LinkLatencyChart.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/LinkLatencyChart.vue)
+  - 悬浮卡片从“节点延迟”改为“节点详情 + 链路详情”
+  - 节点卡片提示用户悬停连线查看真实链路延迟
+  - 链路卡片展示源节点、目标节点、链路类型、时间范围和 ECharts 折线图
+  - metrics 为空时显示“暂无链路数据”，不伪造曲线
+  - metrics 加载中时显示“链路数据加载中”
+- 修改 [src/views/AdminDashboardPage.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/views/AdminDashboardPage.vue)
+  - 页面标题和描述更新为 API v1.8、JWT、真实链路 metrics 的闭环说明
+
+当前前端已经实际使用到的接口：
+
+- `POST /api/v1/auth/login`
+- `GET /api/v1/dashboard/stats`
+- `GET /api/v1/dashboard/nodes`
+- `GET /api/v1/dashboard/edges`
+- `GET /api/v1/dashboard/nodes/{node_id}/metrics?target_id={target_id}&time_range=1h|12h|24h`
+
+当前页面状态：
+
+- 未登录时只显示登录卡片，不会请求 Dashboard 受保护接口
+- 登录成功后展示统计卡片、控制栏、节点关系图和在线节点表格
+- JWT 过期或无效时自动清空登录态，并提示重新登录
+- 无在线节点时显示空态说明
+- 有在线节点但无真实链路时，关系图显示节点并说明等待后端 edges 数据
+- 悬停节点时显示节点详情
+- 悬停或点击连线时显示链路详情和真实 metrics 折线图
+
+后端登录接口未完成时的本地测试办法：
+
+- 当时曾启动根目录 `test/mock-backend.js` 做临时联调（该文件现已删除）
+- 前端保持正常登录流程，不再通过环境变量绕开登录
+- 模拟账号为 `admin / admin123`
+- 模拟后端会返回 JWT，并校验 Dashboard 接口的 `Authorization` 请求头
+
+验证结果：
+
+- `npx vue-tsc --noEmit` 已通过
+
+- `npm run build` 的 TypeScript 与 Vite transform 阶段已通过，但当前机器无法写入历史遗留的 `frontend/dist/assets`，报错为 `拒绝访问`
+- `npx vite build --configLoader native --outDir .codex-build-check` 已通过，用于确认源码可以生产构建
+- `.codex-build-check` 为一次性验证目录，验证后已立即删除，没有作为遗留目录保留
+
+本次之后的联调重点：
+
+- 后端需要实现并返回 `POST /api/v1/auth/login`
+- Dashboard 接口需要校验并接受 `Authorization: Bearer <jwt>`
+- `GET /api/v1/dashboard/edges` 必须返回 `{ source, target, type }`
+- `GET /api/v1/dashboard/nodes/{node_id}/metrics` 必须要求 `target_id`，且不能把 `node_id == target_id` 当作有效请求
+- metrics 为空数组是正常空态，前端会展示空图；有数据时会按 `timestamp` 升序画真实延迟曲线
+
+### 2026-05-24 第十次开发：新增 Mock 后端并移除登录绕过开关（历史方案，相关目录已删除）
+
+说明：
+
+- 这一阶段曾临时使用根目录 `test/` 做本地模拟联调
+- `test/` 目录已经在后续清理中删除
+- 下面这段记录只用于追踪当时做过什么，不再作为当前联调方式
+
+目标：
+
+- 根目录新增 `test/` 模拟后端，覆盖前端当前需要的全部接口
+- 删除前端中临时绕过 Dashboard 登录的环境变量和判断逻辑
+- 本地测试也必须走登录、JWT 保存、Dashboard 请求自动携带认证头这一完整流程
+
+本次具体改动：
+
+- 历史上曾新增 `test/mock-backend.js`（现已删除）
+  - 使用 Node.js 原生 `http` 模块
+  - 不需要安装依赖
+  - 不做持久化
+  - 写死节点、链路、统计和延迟曲线数据
+  - 支持 `POST /api/v1/auth/login`
+  - 支持 `GET /api/v1/dashboard/stats`
+  - 支持 `GET /api/v1/dashboard/nodes`
+  - 支持 `GET /api/v1/dashboard/edges`
+  - 支持 `GET /api/v1/dashboard/nodes/{node_id}/metrics`
+  - Dashboard 接口会校验 `Authorization: Bearer <token>`
+- 历史上曾新增 `test/README.md`（现已删除）
+  - 记录启动命令、登录账号和前端联调方法
+- 修改 [src/api/dashboard.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/api/dashboard.ts)
+  - 删除 `VITE_ENABLE_DASHBOARD_AUTH` 相关逻辑
+  - Dashboard 受保护接口始终按登录态携带 JWT
+  - Dashboard 接口返回 `401` 时始终清空本地登录态
+- 修改 [.env.example](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/.env.example)
+  - 删除 `VITE_ENABLE_DASHBOARD_AUTH`
+- 修改 [src/env.d.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/env.d.ts)
+  - 删除 `VITE_ENABLE_DASHBOARD_AUTH` 类型声明
+- 修改 [src/components/dashboard/OnlineNodeTable.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/OnlineNodeTable.vue)
+  - 删除开发预览模式分支
+  - 退出按钮始终走清空登录态流程
+
+当时的本地测试命令（现已废弃）：
+
+```powershell
+node test/mock-backend.js
+cd frontend
+npm run dev
+```
+
+测试账号：
+
+```text
+username: admin
+password: admin123
+```
+
+### 2026-05-24 第九次开发：清理用户界面中的开发说明
+
+目标：
+
+- 清除页面上不应展示给普通用户的开发说明、接口说明、版本标签和占位文案
+- 保留代码注释，继续方便团队成员学习和维护
+- 让管理后台界面更接近实际产品，而不是开发调试页
+
+本次具体改动：
+
+- 精简 [src/components/layout/AdminTopbar.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/layout/AdminTopbar.vue)
+  - 顶部栏只保留页面标题和必要插槽
+  - 删除面包屑、默认消息按钮、新建按钮、占位用户信息和过长说明
+- 精简 [src/components/layout/AdminSidebar.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/layout/AdminSidebar.vue)
+  - 删除品牌区说明文字
+  - 删除底部环境/开发状态提示块
+- 精简 [src/views/AdminDashboardPage.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/views/AdminDashboardPage.vue)
+  - 删除顶部 `JWT`、`API`、`v1.8` 等开发标签
+  - 侧边栏菜单收敛为实际当前页面相关入口
+- 精简 [src/components/dashboard/OnlineNodeTable.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/OnlineNodeTable.vue)
+  - 删除统计卡片说明文字
+  - 删除控制区大段说明
+  - 删除表格上方解释性文字和重复状态标签
+  - 保留刷新按钮、最近刷新时间、时间范围选择、错误提示、统计数字和表格
+- 精简 [src/components/dashboard/NodeRelationGraph.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/NodeRelationGraph.vue)
+  - 删除拓扑图说明段落和关系摘要卡片
+  - 保留图标题、链路数量和图本体
+- 精简 [src/components/dashboard/LinkLatencyChart.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/LinkLatencyChart.vue)
+  - 删除悬浮卡片中的说明性摘要
+  - 悬浮卡片只展示节点/链路字段和折线图
+
+验证结果：
+
+- `npx vue-tsc --noEmit` 已通过
+
+### 2026-05-24 第十一次开发：节点关系图懒刷新
+
+目标：
+
+- 关系图不再因为后端 5 秒轮询而强制重绘
+- 只有节点或链路拓扑真的变化时，才重新渲染 ECharts 关系图
+- 保留统计卡片、在线节点表格、悬浮卡片数据的正常刷新
+
+本次具体改动：
+
+- 修改 [src/components/dashboard/NodeRelationGraph.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/NodeRelationGraph.vue)
+  - 新增 `graphTopologySignature`
+  - 不再深度监听完整 `graphData`
+  - 改为只监听会影响图形结构和外观的字段
+  - 节点 `last_seen`、流量字段、metrics 采样变化不会再触发整张关系图重新布局
+
+懒刷新规则：
+
+- 会触发关系图重绘：
+  - 在线节点新增或消失
+  - 节点名称、虚拟 IP、NAT 类型、状态、真实邻居数变化
+  - 连线的 `source`、`target`、`type` 变化
+- 不会触发关系图重绘：
+  - 节点最后心跳时间变化
+  - 节点实时收发流量变化
+  - 悬浮卡片里的链路延迟折线图数据变化
+
+验证结果：
+
+- `npx vue-tsc --noEmit` 已通过
+
+### 2026-05-24 第十二次开发：主题色、明暗模式与鼠标光晕
+
+目标：
+
+- 解决浅色卡片区域里鼠标不明显的问题
+- 在顶部栏增加连续主题色滑条，不限制成几个固定颜色档位
+- 增加灯光式明暗按钮，让同一套主题色可以在亮色和暗色氛围之间切换
+- 让卡片、背景、Element Plus 按钮、表格、输入框等基础控件尽量跟随主题变化
+
+本次具体改动：
+
+- 修改 [src/App.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/App.vue)
+  - 新增全局鼠标光晕容器
+  - 通过 `pointermove` 把鼠标坐标写入 CSS 变量
+  - 不隐藏浏览器原生鼠标，避免影响输入框、按钮和表格操作
+- 修改 [src/components/layout/AdminTopbar.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/layout/AdminTopbar.vue)
+  - 新增主题色连续滑条
+  - 新增亮色/暗色灯光切换按钮
+  - 使用 `localStorage` 保存用户选中的主题色和亮暗模式
+- 修改 [src/components/layout/AdminShell.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/layout/AdminShell.vue)
+  - 给后台骨架增加 `app-theme-shell` 类，方便全局主题样式精准作用在后台区域
+- 修改 [src/assets/main.css](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/assets/main.css)
+  - 新增 `--theme-hue`、`--app-primary`、`--app-panel-bg` 等全局主题变量
+  - 新增 `data-theme-mode="light|dim"` 两套亮暗变量
+  - 将 `.panel-surface` 改为读取主题变量
+  - 补充 Element Plus 常用变量，使按钮、表格、输入框跟随主题色
+  - 新增小尺寸鼠标光晕和鼠标描边效果
+- 修改 [src/components/dashboard/NodeRelationGraph.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/NodeRelationGraph.vue)
+  - 主题切换时重新读取 CSS 变量并更新 ECharts 关系图文字、标签和 tooltip 配色
+  - 主题滑条连续拖动时使用 `requestAnimationFrame` 合并图表刷新，避免频繁重排
+  - 关闭 ECharts 关系图默认 tooltip，避免和自定义悬浮卡片重叠
+  - 悬浮卡片定位优先使用原生鼠标坐标，拿不到时用图表 offset 坐标兜底换算
+  - 节点卡片和链路卡片分别使用不同高度估算，避免短节点卡片离鼠标过远
+  - 将关系图滚轮缩放改为自定义低灵敏度缩放，保留画布平移和节点拖拽
+- 修改 [src/components/dashboard/LinkLatencyChart.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/LinkLatencyChart.vue)
+  - 主题切换时同步更新链路延迟折线图配色
+  - 悬浮卡片因为使用 `Teleport` 渲染到 `body`，所以单独补充主题样式，避免暗色模式下仍显示纯白卡片
+  - 折线图每次渲染使用不合并模式清掉旧配置，避免“链路数据加载中”标题在数据加载完成后残留
+- 修改 [src/components/dashboard/OnlineNodeTable.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/OnlineNodeTable.vue)
+  - 增加链路 metrics 缓存，同一链路和同一时间范围重复悬停时直接复用已有数据
+  - 对正在请求中的同一条链路做请求复用，避免鼠标移入移出导致重复请求
+
+当前效果：
+
+- 拖动顶部主题色滑条时，页面主题色会平滑连续变化
+- 点击灯光按钮时，会在亮色和暗色氛围之间切换
+- 鼠标移动时会出现轻量跟随光晕，在白色卡片和暗色卡片里都更容易定位
+
+验证结果：
+
+- `npx vue-tsc --noEmit` 已通过
+- `npx vite build --configLoader native --outDir .codex-build-check` 已通过
+- `.codex-build-check` 为一次性验证目录，验证后已删除
+
+### 2026-05-30 第十三次开发：补齐离线节点展示、链路实时刷新与联调说明
+
+目标：
+
+- 继续按 `docs/NetWeaver-API-v1.8.md` 收口 Dashboard 前端
+- 修正“节点掉线后直接从前端消失”的问题，让 `offline` 状态能被明确看到
+- 修正“同一条链路长时间停留时，折线图只读缓存不再刷新”的问题
+- 把真实联调时该改哪里、怎么改、改完要不要重启，全部写进 README
+
+本次具体改动：
+
+- 修改 [src/components/dashboard/OnlineNodeTable.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/OnlineNodeTable.vue)
+  - `allNodes` 明确作为“全部节点”使用，不再只拿在线节点参与主体渲染
+  - 节点表格从“在线节点”改为“节点列表”，现在会同时展示在线和离线节点
+  - 新增 `offlineNodes`、`hasOnlyOfflineNodes` 等计算状态
+  - 当当前没有在线节点、但后端仍返回离线节点时，页面不再空白，而是保留离线节点供排查
+  - 已选中链路在轮询刷新时，`metrics` 现在会静默强制刷新，而不是长期复用旧缓存
+  - 静默刷新时若本地已有旧曲线，会先继续显示旧曲线，再在后台取新数据，避免每 5 秒闪烁一次“加载中”
+- 修改 [src/components/dashboard/NodeRelationGraph.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/NodeRelationGraph.vue)
+  - 关系图数据源从“仅在线节点”改为“全部节点”
+  - 离线节点现在会保留在图里，并通过灰色样式和状态字段体现 `offline`
+  - 图标题右侧新增总数、在线数、离线数标签，方便直接核对后端状态同步结果
+- 修改 [src/components/dashboard/LinkLatencyChart.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/LinkLatencyChart.vue)
+  - 节点悬浮卡片新增“公网地址”“当前状态”“最后心跳”
+  - 为了适配新增字段，节点卡片的定位高度估算同步调整
+- 修改 [README.md](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/README.md)
+  - 顶部新增“当前联调配置（请优先看这一节）”
+  - 明确说明现在不再依赖 `test/` Mock 后端目录
+  - 明确说明开发联调时优先修改 `.env.development.local`
+  - 明确说明 `VITE_API_BASE_URL` 与 `VITE_PROXY_TARGET` 的区别
+  - 补充本机联调、校园网 / 局域网联调、直接请求后端三种配置示例
+  - 补充 `npm install / npm run dev / npm run build / npm run preview` 的使用场景
+  - 补充“改完环境变量后需要重启开发服务器”这一容易漏掉的步骤
+
+当前页面效果变化：
+
+- 节点掉线后，只要后端 `nodes` 接口把该节点状态改成 `offline`，前端就会继续把它显示在图和表格里
+- 与离线节点相关的真实边仍然只依赖 `edges` 接口；只要后端移除边，前端关系图会同步断开
+- 悬停同一条链路较长时间时，折线图数据会随轮询静默更新，不再长期停在旧缓存
+
+验证结果：
+
+- `npx vue-tsc --noEmit` 已通过
+- `npm run build` 的 TypeScript 与 Vite transform 阶段已通过，但当前机器仍然无法写入 `frontend/dist/assets`，报错为 `拒绝访问`
+- `npx vite build --configLoader native --outDir .codex-build-check` 已通过，用于确认本轮源码可以完整生产构建
+- `.codex-build-check` 为一次性验证目录，验证后已立即删除，没有作为遗留目录保留

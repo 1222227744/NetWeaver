@@ -2,15 +2,20 @@
 import * as echarts from 'echarts'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import type { DashboardMetricPoint, DashboardNode } from '@/api/dashboard'
+import type {
+  DashboardMetricPoint,
+  DashboardMetricsTimeRange,
+  DashboardNode,
+  GraphLinkItem
+} from '@/api/dashboard'
 
-// 这个组件只负责“悬浮详情卡片 + 折线图显示”。
-// 它不自己向后端发请求。
+// 这个组件只负责“悬浮卡片怎么展示”和“折线图怎么画”。
+// 它不发请求，也不决定当前应该展示哪条链路。
 //
-// 也就是说：
-// - 谁请求 metrics？父组件请求
-// - 谁决定当前展示哪个节点？父组件和关系图组件一起决定
-// - 这个组件做什么？只负责把传进来的数据画出来
+// v1.8 之后要特别注意：
+// - metrics 是“两个节点之间的链路延迟”
+// - 不是“某个节点自己的延迟”
+// 所以 props 里同时接收 sourceNode、targetNode 和 link。
 
 interface HoverPanelPosition {
   left: number
@@ -18,51 +23,114 @@ interface HoverPanelPosition {
 }
 
 const props = defineProps<{
+  link: GraphLinkItem | null
+  loading: boolean
   metrics: DashboardMetricPoint[]
   node: DashboardNode | null
   position: HoverPanelPosition
+  selectedTimeRange: DashboardMetricsTimeRange
+  sourceNode: DashboardNode | null
+  targetNode: DashboardNode | null
   visible: boolean
 }>()
 
 const chartContainer = ref<HTMLDivElement | null>(null)
 const chartInstance = ref<echarts.ECharts | null>(null)
+let themeRenderFrame = 0
 
 const hoverCardStyle = computed(() => ({
-  // 因为这个卡片是 fixed 定位，所以 left/top 要自己计算像素位置。
   left: `${props.position.left}px`,
   top: `${props.position.top}px`
 }))
 
 const latencyHistory = computed(() => {
-  // 后端给的是时间戳，这里把它转换成适合图表 x 轴显示的时间字符串。
-  return props.metrics.map((point) => ({
-    timeLabel: new Date(point.timestamp * 1000).toLocaleTimeString('zh-CN', {
-      hour12: false,
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    }),
-    latencyMs: point.latency_ms
-  }))
+  // 虽然接口文档规定后端按 timestamp 升序返回，
+  // 但前端这里再排序一次，可以提升容错性。
+  return [...props.metrics]
+    .sort((previous, current) => previous.timestamp - current.timestamp)
+    .map((point) => ({
+      timeLabel: new Date(point.timestamp * 1000).toLocaleTimeString('zh-CN', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      }),
+      latencyMs: point.latency_ms
+    }))
 })
 
-const chartSummary = computed(() => {
-  if (!props.node) {
-    return '当前没有可展示的节点信息。'
+const cardTitle = computed(() => {
+  if (props.link) {
+    return '链路详情'
   }
 
-  if (latencyHistory.value.length === 0) {
-    return `当前节点 ${props.node.hostname} 还没有返回链路监控数据。等后端补充 metrics 数据后，这里会展示真实延迟曲线。`
-  }
-
-  return `这里展示的是节点 ${props.node.hostname} 当前拿到的真实链路延迟采样结果。`
+  return '节点详情'
 })
+
+const formatOptionalText = (value: string | number | null | undefined) => {
+  if (value === null || value === undefined || value === '') {
+    return '未上报'
+  }
+
+  return String(value)
+}
+
+const formatPublicAddress = (node: DashboardNode | null) => {
+  if (!node) {
+    return '未上报'
+  }
+
+  const publicIp = formatOptionalText(node.public_ip)
+
+  if (node.public_port === null || node.public_port === undefined || node.public_port === 0) {
+    return publicIp
+  }
+
+  return `${publicIp}:${node.public_port}`
+}
+
+const formatStatusText = (status: DashboardNode['status'] | undefined) => {
+  if (status === 'online') {
+    return '在线'
+  }
+
+  if (status === 'offline') {
+    return '离线'
+  }
+
+  return '未知'
+}
+
+const formatLastSeen = (timestamp?: number) => {
+  if (!timestamp) {
+    return '未上报'
+  }
+
+  return new Date(timestamp * 1000).toLocaleString('zh-CN', { hour12: false })
+}
+
+const getThemeValue = (name: string, fallback: string) => {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
+}
+
+const getChartTheme = () => {
+  // 悬浮卡片里的折线图也是 ECharts canvas。
+  // 主题切换后，需要重新把 CSS 变量转换成 ECharts 能识别的颜色。
+  return {
+    axis: getThemeValue('--app-panel-border', '#cbd5e1'),
+    fill: getThemeValue('--app-primary-soft', 'rgba(15, 118, 110, 0.14)'),
+    line: getThemeValue('--app-primary', '#0f766e'),
+    panelBackground: getThemeValue('--app-panel-bg-solid', '#ffffff'),
+    text: getThemeValue('--app-text-soft', '#475569'),
+    textMuted: getThemeValue('--app-text-muted', '#64748b')
+  }
+}
 
 const renderChart = async () => {
   await nextTick()
 
-  if (!props.visible || !chartContainer.value) {
-    // 卡片不可见时，不需要继续画图。
+  if (!props.visible || !props.link || !chartContainer.value) {
+    chartInstance.value?.clear()
     return
   }
 
@@ -70,8 +138,27 @@ const renderChart = async () => {
     chartInstance.value = echarts.init(chartContainer.value)
   }
 
+  const chartTheme = getChartTheme()
+
+  if (props.loading) {
+    chartInstance.value.clear()
+    chartInstance.value.setOption({
+      title: {
+        text: '链路数据加载中',
+        left: 'center',
+        top: 'middle',
+        textStyle: {
+          color: chartTheme.textMuted,
+          fontSize: 15,
+          fontWeight: 500
+        }
+      }
+    }, true)
+    chartInstance.value.resize()
+    return
+  }
+
   if (latencyHistory.value.length === 0) {
-    // 如果后端还没有返回 metrics，不画假数据，直接显示空态。
     chartInstance.value.clear()
     chartInstance.value.setOption({
       title: {
@@ -79,20 +166,28 @@ const renderChart = async () => {
         left: 'center',
         top: 'middle',
         textStyle: {
-          color: '#94a3b8',
+          color: chartTheme.textMuted,
           fontSize: 15,
           fontWeight: 500
         }
       }
-    })
+    }, true)
     chartInstance.value.resize()
     return
   }
 
   chartInstance.value.setOption({
+    title: {
+      show: false
+    },
     animationDuration: 250,
     tooltip: {
       trigger: 'axis',
+      backgroundColor: chartTheme.panelBackground,
+      borderColor: chartTheme.axis,
+      textStyle: {
+        color: chartTheme.text
+      },
       formatter: (params: Array<Record<string, unknown>>) => {
         const point = params[0]
 
@@ -115,11 +210,11 @@ const renderChart = async () => {
       data: latencyHistory.value.map((point) => point.timeLabel),
       axisLine: {
         lineStyle: {
-          color: '#cbd5e1'
+          color: chartTheme.axis
         }
       },
       axisLabel: {
-        color: '#475569',
+        color: chartTheme.text,
         fontSize: 11
       }
     },
@@ -130,23 +225,21 @@ const renderChart = async () => {
       axisLine: {
         show: true,
         lineStyle: {
-          color: '#cbd5e1'
+          color: chartTheme.axis
         }
       },
       splitLine: {
         lineStyle: {
-          color: '#e2e8f0'
+          color: chartTheme.axis
         }
       },
       axisLabel: {
-        color: '#475569',
+        color: chartTheme.text,
         fontSize: 11
       }
     },
     series: [
       {
-        // 现在这里展示的已经不是“本地预览”，
-        // 而是父组件传进来的真实 metrics 数据。
         name: '链路延迟',
         type: 'line',
         smooth: true,
@@ -155,17 +248,17 @@ const renderChart = async () => {
         data: latencyHistory.value.map((point) => point.latencyMs),
         lineStyle: {
           width: 3,
-          color: '#0f766e'
+          color: chartTheme.line
         },
         itemStyle: {
-          color: '#0f766e'
+          color: chartTheme.line
         },
         areaStyle: {
-          color: 'rgba(15, 118, 110, 0.14)'
+          color: chartTheme.fill
         }
       }
     ]
-  })
+  }, true)
 
   chartInstance.value.resize()
 }
@@ -174,10 +267,33 @@ const handleResize = () => {
   chartInstance.value?.resize()
 }
 
+const handleThemeChange = () => {
+  if (themeRenderFrame) {
+    window.cancelAnimationFrame(themeRenderFrame)
+  }
+
+  themeRenderFrame = window.requestAnimationFrame(() => {
+    themeRenderFrame = 0
+    void renderChart()
+  })
+}
+
 watch(
-  () => [props.visible, props.node?.node_id, props.metrics.length],
+  () => [
+    props.visible,
+    props.link?.id,
+    props.loading,
+    props.metrics.length,
+    props.selectedTimeRange
+  ],
   () => {
-    // 只要可见状态、节点 id、metrics 数量任意一个变化，就重画图。
+    void renderChart()
+  }
+)
+
+watch(
+  () => props.metrics,
+  () => {
     void renderChart()
   },
   { deep: true }
@@ -186,10 +302,15 @@ watch(
 onMounted(() => {
   void renderChart()
   window.addEventListener('resize', handleResize)
+  window.addEventListener('netweaver-theme-change', handleThemeChange)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
+  window.removeEventListener('netweaver-theme-change', handleThemeChange)
+  if (themeRenderFrame) {
+    window.cancelAnimationFrame(themeRenderFrame)
+  }
   chartInstance.value?.dispose()
   chartInstance.value = null
 })
@@ -198,55 +319,125 @@ onBeforeUnmount(() => {
 <template>
   <Teleport to="body">
     <!--
-      Teleport 的意思可以简单理解成：
-      “这个组件虽然写在当前层级里，但真正渲染时直接放到 body 下面去”。
-      这样能避免被页面里别的盒子遮住。
+      Teleport 会把悬浮卡片渲染到 body 下面。
+      这样它不会被关系图、表格或其他父容器的层级挡住。
     -->
     <div
-      v-show="props.visible && props.node"
-      class="pointer-events-none fixed z-[200] w-[360px] rounded-[1.5rem] border border-slate-200 bg-white/95 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.18)] backdrop-blur"
+      v-show="props.visible && (props.node || props.link)"
+      class="latency-hover-card pointer-events-none fixed z-[200] w-[380px] rounded-[1.5rem] border p-5 backdrop-blur"
       :style="hoverCardStyle"
     >
       <div class="flex items-start justify-between gap-4">
         <div class="min-w-0">
-          <p class="panel-heading">Node Detail</p>
-          <h3 class="mt-2 truncate text-lg font-semibold text-slate-900">{{ props.node?.hostname }}</h3>
-          <p class="mt-1 text-sm text-slate-500">{{ props.node?.node_id }}</p>
+          <p class="panel-heading">{{ cardTitle }}</p>
+          <h3 v-if="props.link && props.sourceNode && props.targetNode" class="mt-2 truncate text-lg font-semibold text-slate-900">
+            {{ props.sourceNode.hostname }} -> {{ props.targetNode.hostname }}
+          </h3>
+          <h3 v-else class="mt-2 truncate text-lg font-semibold text-slate-900">
+            {{ props.node?.hostname }}
+          </h3>
+          <p v-if="props.link" class="mt-1 text-sm text-slate-500">
+            {{ props.link.source }} -> {{ props.link.target }}
+          </p>
+          <p v-else class="mt-1 text-sm text-slate-500">{{ props.node?.node_id }}</p>
         </div>
 
-        <el-tag round :type="props.node?.status === 'online' ? 'success' : 'info'">
-          {{ props.node?.status }}
+        <el-tag v-if="props.link" round :type="props.link.edgeType === 'p2p' ? 'success' : 'warning'">
+          {{ props.link.relationText }}
+        </el-tag>
+        <el-tag v-else round :type="props.node?.status === 'online' ? 'success' : 'info'">
+          {{ formatStatusText(props.node?.status) }}
         </el-tag>
       </div>
 
-      <div class="mt-4 grid grid-cols-2 gap-3 text-sm text-slate-600">
+      <div v-if="props.link && props.sourceNode && props.targetNode" class="mt-4 grid grid-cols-2 gap-3 text-sm text-slate-600">
         <div class="rounded-2xl bg-slate-50 px-3 py-2">
-          <p class="text-xs text-slate-400">虚拟 IP</p>
-          <p class="mt-1 text-slate-700">{{ props.node?.virtual_ip }}</p>
+          <p class="text-xs text-slate-400">源节点虚拟 IP</p>
+          <p class="mt-1 text-slate-700">{{ props.sourceNode.virtual_ip }}</p>
         </div>
         <div class="rounded-2xl bg-slate-50 px-3 py-2">
-          <p class="text-xs text-slate-400">公网 IP</p>
-          <p class="mt-1 text-slate-700">{{ props.node?.public_ip }}</p>
+          <p class="text-xs text-slate-400">目标节点虚拟 IP</p>
+          <p class="mt-1 text-slate-700">{{ props.targetNode.virtual_ip }}</p>
+        </div>
+        <div class="rounded-2xl bg-slate-50 px-3 py-2">
+          <p class="text-xs text-slate-400">源节点 NAT</p>
+          <p class="mt-1 text-slate-700">{{ props.sourceNode.nat_type }}</p>
+        </div>
+        <div class="rounded-2xl bg-slate-50 px-3 py-2">
+          <p class="text-xs text-slate-400">目标节点 NAT</p>
+          <p class="mt-1 text-slate-700">{{ props.targetNode.nat_type }}</p>
+        </div>
+      </div>
+
+      <div v-else-if="props.node" class="mt-4 grid grid-cols-2 gap-3 text-sm text-slate-600">
+        <div class="rounded-2xl bg-slate-50 px-3 py-2">
+          <p class="text-xs text-slate-400">虚拟 IP</p>
+          <p class="mt-1 text-slate-700">{{ props.node.virtual_ip }}</p>
+        </div>
+        <div class="rounded-2xl bg-slate-50 px-3 py-2">
+          <p class="text-xs text-slate-400">公网地址</p>
+          <p class="mt-1 text-slate-700">{{ formatPublicAddress(props.node) }}</p>
         </div>
         <div class="rounded-2xl bg-slate-50 px-3 py-2">
           <p class="text-xs text-slate-400">NAT 类型</p>
-          <p class="mt-1 text-slate-700">{{ props.node?.nat_type }}</p>
+          <p class="mt-1 text-slate-700">{{ props.node.nat_type }}</p>
         </div>
         <div class="rounded-2xl bg-slate-50 px-3 py-2">
-          <p class="text-xs text-slate-400">已连接节点数</p>
-          <p class="mt-1 text-slate-700">{{ props.node?.connected_peers }}</p>
+          <p class="text-xs text-slate-400">当前状态</p>
+          <p class="mt-1 text-slate-700">{{ formatStatusText(props.node.status) }}</p>
+        </div>
+        <div class="rounded-2xl bg-slate-50 px-3 py-2">
+          <p class="text-xs text-slate-400">已连接邻居</p>
+          <p class="mt-1 text-slate-700">{{ props.node.connected_peers }}</p>
+        </div>
+        <div class="rounded-2xl bg-slate-50 px-3 py-2">
+          <p class="text-xs text-slate-400">最后心跳</p>
+          <p class="mt-1 text-slate-700">{{ formatLastSeen(props.node.last_seen) }}</p>
         </div>
       </div>
 
-      <div class="mt-4 rounded-[1.25rem] border border-slate-200 bg-slate-50 px-4 py-3">
-        <p class="text-sm leading-6 text-slate-600">{{ chartSummary }}</p>
-      </div>
-
-      <!--
-        真正的折线图就画在这个容器里。
-        renderChart() 里会拿到这个 DOM，然后交给 ECharts 初始化。
-      -->
-      <div ref="chartContainer" class="mt-4 h-[180px] rounded-[1.25rem] border border-slate-200 bg-white" />
+      <div
+        v-show="props.link"
+        ref="chartContainer"
+        class="mt-4 h-[180px] rounded-[1.25rem] border border-slate-200 bg-white"
+      />
     </div>
   </Teleport>
 </template>
+
+<style scoped>
+.latency-hover-card {
+  background: var(--app-panel-bg);
+  border-color: var(--app-panel-border);
+  box-shadow: 0 24px 80px hsl(var(--theme-hue) 45% 10% / 0.22);
+  color: var(--app-text);
+  transition:
+    background-color 0.45s ease,
+    border-color 0.45s ease,
+    box-shadow 0.45s ease,
+    color 0.45s ease;
+}
+
+.latency-hover-card .text-slate-900 {
+  color: var(--app-text);
+}
+
+.latency-hover-card .text-slate-700 {
+  color: var(--app-text-soft);
+}
+
+.latency-hover-card .text-slate-600,
+.latency-hover-card .text-slate-500,
+.latency-hover-card .text-slate-400 {
+  color: var(--app-text-muted);
+}
+
+.latency-hover-card .bg-white,
+.latency-hover-card .bg-slate-50 {
+  background-color: var(--app-inner-bg);
+}
+
+.latency-hover-card .border-slate-200 {
+  border-color: var(--app-panel-border);
+}
+</style>

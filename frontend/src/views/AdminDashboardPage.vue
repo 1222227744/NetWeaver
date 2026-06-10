@@ -1,14 +1,5 @@
 <script setup lang="ts">
-import {
-  Bell,
-  Connection,
-  Document,
-  Files,
-  Grid,
-  Monitor,
-  Setting,
-  User
-} from '@element-plus/icons-vue'
+import { Connection, Grid, Monitor } from '@element-plus/icons-vue'
 import { ref } from 'vue'
 
 import OnlineNodeTable from '@/components/dashboard/OnlineNodeTable.vue'
@@ -33,26 +24,11 @@ const activeMenu = ref('dashboard')
 // 这里先用本地常量模拟后台菜单，后续接路由时可把 index 改成 route name/path。
 const menuGroups: SidebarMenuGroup[] = [
   {
-    title: '工作台',
+    title: '网络',
     items: [
       { index: 'dashboard', label: '概览面板', icon: Grid },
-      { index: 'monitor', label: '在线节点', icon: Monitor, hint: 'LIVE' }
-    ]
-  },
-  {
-    title: '协作管理',
-    items: [
-      { index: 'project', label: '项目空间', icon: Files },
-      { index: 'team', label: '成员权限', icon: User },
-      { index: 'message', label: '消息中心', icon: Bell, hint: '12' }
-    ]
-  },
-  {
-    title: '系统设置',
-    items: [
-      { index: 'api', label: '接口配置', icon: Connection },
-      { index: 'document', label: '文档中心', icon: Document },
-      { index: 'setting', label: '基础设置', icon: Setting }
+      { index: 'monitor', label: '在线节点', icon: Monitor },
+      { index: 'links', label: '链路拓扑', icon: Connection }
     ]
   }
 ]
@@ -68,25 +44,15 @@ const menuGroups: SidebarMenuGroup[] = [
   <AdminShell
     v-model:active-menu="activeMenu"
     :menu-groups="menuGroups"
-    page-title="控制台真实接口总览"
-    page-description="当前页面会同时读取 stats、nodes、edges 和 metrics 相关接口，在同一页中展示真实统计卡片、真实节点关系图、在线节点表格，以及节点悬停时的链路监控空态或真实曲线。"
+    page-title="NetWeaver 控制台"
+    page-description=""
   >
-    <!--
-      这里往 AdminShell 顶部栏右侧的 actions 插槽里塞了两个标签。
-      所以页面顶栏右边显示什么，不是写死在 AdminShell 里的，
-      而是由这个页面自己决定。
-    -->
-    <template #header-actions>
-      <el-tag size="large" round>GET /api/v1/dashboard/*</el-tag>
-      <el-tag size="large" round type="success">Real API</el-tag>
-    </template>
-
     <!--
       当前真正的业务主体在 OnlineNodeTable 里。
       名字虽然叫 Table，但现在它实际上同时负责：
-      1. 统计卡片
-      2. 节点关系图
-      3. 在线节点表格
+      1. Dashboard 登录和 JWT 管理
+      2. stats / nodes / edges / metrics 请求
+      3. 统计卡片、节点关系图、在线节点表格
     -->
     <OnlineNodeTable />
   </AdminShell>

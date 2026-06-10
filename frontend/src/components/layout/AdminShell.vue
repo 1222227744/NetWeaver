@@ -49,7 +49,7 @@ const openSidebar = () => {
     它只负责搭出后台的通用框架。
     所以后面你们新增页面时，大概率仍然会复用这个组件。
   -->
-  <div class="min-h-screen text-slate-900">
+  <div class="app-theme-shell min-h-screen text-slate-900">
     <div class="mx-auto flex min-h-screen max-w-[1800px] gap-6 p-4 sm:p-6">
       <!-- 大屏下保持固定侧边导航，后台常用入口不需要折叠到内容流里 -->
       <AdminSidebar
