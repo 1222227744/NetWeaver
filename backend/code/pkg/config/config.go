@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -29,6 +30,8 @@ const (
 	EnvDashboardPassword = "NETWEAVER_DASHBOARD_PASSWORD"
 	EnvJWTSecret         = "NETWEAVER_JWT_SECRET"
 	EnvNodePSK           = "NETWEAVER_NODE_PSK"
+	EnvRelayAddr         = "NETWEAVER_RELAY_ADDR"
+	EnvRelayPort         = "NETWEAVER_RELAY_PORT"
 )
 
 func DashboardUsername() string {
@@ -45,6 +48,23 @@ func JWTSecret() string {
 
 func NodePSK() string {
 	return EnvOrDefault(EnvNodePSK, DefaultNodePSK)
+}
+
+func RelayAddr() string {
+	return EnvOrDefault(EnvRelayAddr, DefaultRelayAddr)
+}
+
+func RelayPort() int {
+	value := strings.TrimSpace(os.Getenv(EnvRelayPort))
+	if value == "" {
+		return DefaultRelayPort
+	}
+
+	port, err := strconv.Atoi(value)
+	if err != nil || port <= 0 {
+		return DefaultRelayPort
+	}
+	return port
 }
 
 func EnvOrDefault(key string, fallback string) string {
