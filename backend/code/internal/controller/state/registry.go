@@ -246,8 +246,8 @@ func (r *Registry) PeersFor(nodeID string) ([]protocol.PeerInfo, bool) {
 			RecommendMode:    mode,
 		}
 		if mode == protocol.RecommendModeRelay {
-			peer.RelayAddr = config.DefaultRelayAddr
-			peer.RelayPort = config.DefaultRelayPort
+			peer.RelayAddr = config.RelayAddr()
+			peer.RelayPort = config.RelayPort()
 			peer.RelaySessionID = relaySessionID(nodeID, node.NodeID)
 		}
 		peers = append(peers, peer)
