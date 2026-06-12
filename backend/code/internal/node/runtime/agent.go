@@ -341,7 +341,15 @@ func (a *Agent) syncPeers(ctx context.Context) {
 
 	summary := make([]string, 0, len(peers.Peers))
 	for _, peer := range peers.Peers {
-		summary = append(summary, fmt.Sprintf("%s(%s,%s)", peer.TargetHostname, peer.TargetVirtualIP, peer.RecommendMode))
+		relayAddr := strings.TrimSpace(peer.RelayAddr)
+		if relayAddr == "" {
+			relayAddr = config.DefaultRelayAddr
+		}
+		relayPort := peer.RelayPort
+		if relayPort <= 0 {
+			relayPort = config.DefaultRelayPort
+		}
+		summary = append(summary, fmt.Sprintf("%s(%s,%s,relay=%s:%d,session=%d)", peer.TargetHostname, peer.TargetVirtualIP, peer.RecommendMode, relayAddr, relayPort, peer.RelaySessionID))
 	}
 	log.Printf("peers synced: %s", strings.Join(summary, ", "))
 }
