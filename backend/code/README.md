@@ -128,7 +128,9 @@ go run ./cmd/node run \
   -hostname node-a \
   -local-ip 192.168.1.10 \
   -data-addr 0.0.0.0:0 \
-  -tun-name tuno
+  -tun-name tuno \
+  -tun-auto-config \
+  -tun-auto-cleanup
 ```
 
 常见参数说明：
@@ -143,6 +145,9 @@ go run ./cmd/node run \
 - `-psk`：覆盖节点 PSK；默认会读取 `NETWEAVER_NODE_PSK`
 - `-tun`：是否启用 TUN 数据面，默认 `true`
 - `-tun-name`：TUN 网卡名，默认 `tuno`
+- `-tun-auto-config`：节点注册拿到 `virtual_ip` 后，自动执行 `ip addr replace ...` 和 `ip link set ... up`
+- `-tun-auto-cleanup`：节点退出时，自动删除刚才自动加上的 `virtual_ip`，并把网卡置为 down
+- `-tun-prefix`：自动配置 TUN 时使用的前缀长度，默认从 `10.0.0.0/16` 推导出 `16`
 
 ## TUN 模式说明
 
@@ -160,7 +165,37 @@ go run ./cmd/node run \
 go run ./cmd/node run -controller http://127.0.0.1:8080 -tun=false
 ```
 
+如果你要减少手工命令，推荐直接这样运行：
+
+```bash
+go run ./cmd/node run \
+  -controller http://127.0.0.1:8080 \
+  -hostname node-a \
+  -local-ip 192.168.1.10 \
+  -data-addr 0.0.0.0:9101 \
+  -tun-name nw0 \
+  -tun-auto-config \
+  -tun-auto-cleanup
+```
+
+这套参数的效果是：
+
+- Node 注册成功拿到 `virtual_ip` 后，会自动给 `nw0` 配置该地址并把网卡拉起。
+- Node 退出时，会自动把这次自动配置的地址删掉，并把 `nw0` 置为 down。
+- 联调时不再需要手动执行 `ip addr replace ...` 和 `ip link set ... up/down`。
+
 如果你要真正验证 TUN 数据面，请确保当前 Linux / WSL / 容器环境允许创建 TUN，并按日志提示配置虚拟网卡地址。
+
+### WSL / P2P 说明
+
+当前代码已经可以把 TUN 网卡的“配置 / 解除配置”自动化到 `node run` 参数里，但这只能降低操作门槛，不能单靠代码保证 WSL 一定打成 P2P。
+
+如果你在 WSL 里联调，建议：
+
+1. 尽量使用 WSL mirrored networking，而不是默认 NAT。
+2. 给 `-data-addr` 指定固定端口，例如 `0.0.0.0:9101`。
+3. 确认 Windows 防火墙放行该 UDP 端口。
+4. 如果仍然打洞失败，不代表系统不可用，当前链路会回退到 Relay。
 
 ## P2P 实验模式
 

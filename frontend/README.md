@@ -564,7 +564,7 @@ npm run preview
 
 与后端现状有关的事实记录：
 
-- 当前仓库里的 Go 控制器代码还没有实现 `GET /api/v1/dashboard/nodes`
+- 这条记录对应当时的仓库状态：那一版 Go 控制器代码还没有实现 `GET /api/v1/dashboard/nodes`
 - 当前后端只看得到根路径 `/` 的 `Ping` 接口
 - 所以前端源码虽然已经切到真实请求模式，但如果后端还没补这个路由，页面会显示接口失败提示，而不会再回退到 mock 数据
 
@@ -581,7 +581,7 @@ npm run preview
 
 - 修改 [src/api/dashboard.ts](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/api/dashboard.ts)
   - 删除先前自行约定的链路延迟接口类型和请求方法
-  - 当前请求层重新只保留 `GET /api/v1/dashboard/nodes`
+  - 当时的请求层重新只保留 `GET /api/v1/dashboard/nodes`
 - 重写 [src/components/dashboard/LinkLatencyChart.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/LinkLatencyChart.vue)
   - 组件职责从“实时请求延迟接口”改为“节点悬停详情卡片”
   - 组件接收当前悬停节点与屏幕坐标

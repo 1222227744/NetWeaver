@@ -92,7 +92,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  go run ./cmd/node [tun flags]")
 	fmt.Fprintln(os.Stderr, "  go run ./cmd/node tun [tun flags]")
-	fmt.Fprintln(os.Stderr, "  go run ./cmd/node run -controller http://127.0.0.1:8080 -tun-name tuno")
+	fmt.Fprintln(os.Stderr, "  go run ./cmd/node run -controller http://127.0.0.1:8080 -tun-name tuno -tun-auto-config -tun-auto-cleanup")
 	fmt.Fprintln(os.Stderr, "  go run ./cmd/node p2p -profile A")
 	fmt.Fprintln(os.Stderr, "  go run ./cmd/node p2p -profile B")
 }
