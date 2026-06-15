@@ -117,6 +117,14 @@ const graphTopologySignature = computed(() => {
 const onlineNodeCount = computed(() => props.nodes.filter((node) => node.status === 'online').length)
 const offlineNodeCount = computed(() => props.nodes.filter((node) => node.status === 'offline').length)
 
+// 图区域不再写死为固定高度。
+// 节点越多，就给关系图更多纵向空间，避免中大型拓扑都挤在一个小盒子里。
+const graphHeight = computed(() => {
+  const baseHeight = 420
+  const extraHeight = Math.max(props.nodes.length - 4, 0) * 28
+  return Math.min(baseHeight + extraHeight, 660)
+})
+
 const hoveredSourceNode = computed(() => {
   if (!hoveredLink.value) {
     return null
@@ -385,8 +393,6 @@ const renderChart = async (options: { replace?: boolean } = {}) => {
           nodeScaleRatio: 0.35,
           draggable: true,
           symbol: 'circle',
-          edgeSymbol: ['none', 'arrow'],
-          edgeSymbolSize: [0, 12],
           force: {
             repulsion: 340,
             edgeLength: 190,
@@ -472,6 +478,11 @@ watch(graphTopologySignature, () => {
   void renderChart()
 })
 
+watch(graphHeight, async () => {
+  await nextTick()
+  chartInstance.value?.resize()
+})
+
 onMounted(() => {
   void renderChart()
   window.addEventListener('resize', handleResize)
@@ -493,10 +504,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="panel-surface p-6">
+  <section class="panel-surface h-full scroll-mt-28 p-6" data-admin-section="topology">
     <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
       <div>
         <h2 class="text-xl font-semibold text-slate-900">节点关系图</h2>
+        <p class="mt-2 text-sm text-slate-500">
+          图中的连线表示当前已经建立成功的真实链路，标签文字直接区分 `P2P` 和 `Relay`。
+        </p>
       </div>
 
       <div class="flex flex-wrap items-center gap-3">
@@ -515,7 +529,11 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div ref="chartContainer" class="mt-6 h-[380px] rounded-[1.5rem] border border-slate-200 bg-white" />
+    <div
+      ref="chartContainer"
+      class="mt-6 rounded-[1.5rem] border border-slate-200 bg-white"
+      :style="{ height: `${graphHeight}px` }"
+    />
 
     <LinkLatencyChart
       :link="hoveredLink"

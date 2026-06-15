@@ -234,6 +234,42 @@ frontend/
 
 ## 变更记录
 
+### 2026-06-15 本次开发：控制台落地微调与部署说明对齐
+
+目标：
+
+- 把控制台从“偏展示页”进一步收敛成“更适合联调和演示的管理台”
+- 修正容易误导联调人员的页面语义和后端默认配置说明
+- 补足真实部署前最容易漏掉的默认值与环境变量说明
+
+具体改动：
+
+- 调整 [src/views/AdminDashboardPage.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/views/AdminDashboardPage.vue)
+  - 侧边栏菜单改成真正可用的“页内导航”，不再假装切多个页面
+- 调整 [src/components/layout/AdminSidebar.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/layout/AdminSidebar.vue)
+  - 注释和菜单语义同步为“滚动到对应区块”
+- 调整 [src/components/dashboard/NodeRelationGraph.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/NodeRelationGraph.vue)
+  - 去掉容易误导的箭头连线
+  - 关系图高度不再固定写死，而是随节点数量扩展
+  - 补充说明文字，让使用者知道图中链路是已经建立成功的真实链路
+- 调整 [src/components/dashboard/OnlineNodeTable.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/components/dashboard/OnlineNodeTable.vue)
+  - 页面重新分成“概览、拓扑、节点列表”三个区块
+  - 节点列表和拓扑图改成同一层的双栏布局，更接近控制台使用习惯
+  - 表格默认把在线节点排在前面，便于联调时先关注当前活跃节点
+- 调整 [src/App.vue](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/App.vue) 和 [src/assets/main.css](/d:/Documents/WorkSpace/30-Playground/frontend/planA/NetWeaver/frontend/src/assets/main.css)
+  - 移除全局鼠标光晕，减少装饰性视觉干扰
+
+这次改动后的页面理解方式：
+
+- `控制台概览`：看总节点数、在线数、链路数、运行时长
+- `链路拓扑`：看当前已建立成功的真实关系边，以及边的 `P2P / Relay` 类型
+- `节点列表`：看节点明细，优先核对在线状态、最后心跳和公网地址
+
+验证结果：
+
+- 已执行前端构建检查，确保页面结构改动后仍可打包
+- 这次没有引入新的前端依赖
+
 ### 2026-04-23 第一次开发：后台骨架初始化
 
 目标：

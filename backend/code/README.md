@@ -1,175 +1,199 @@
-# Netweaver Backend
+# NetWeaver Backend
 
-这是一个 Go 后端项目，主要包含两个可运行入口：
+这份说明只描述当前 `backend/code` 目录下真实存在、并且已经和仓库现状对齐的后端启动方式。
 
-- HTTP 控制器服务：`cmd/controller`
-- 节点程序：`cmd/node`
+## 目录定位
 
-项目运行目录是：
+- Go 模块根目录是 `backend/code`
+- Controller 启动入口是 `backend/code/cmd/controller`
+- Node 启动入口是 `backend/code/cmd/node`
 
-```bash
-cd /home/xyc20060125/projects/temp/NetWeaver
-```
-
-> 当前仓库根目录已经配置了 `go.work`，可以直接在仓库根目录运行后端 Go 模块。
-
-## 运行 HTTP 后端服务
-
-启动控制器服务：
+也就是说，后端相关命令推荐先进入：
 
 ```bash
-cd /home/xyc20060125/projects/temp/NetWeaver
-go run ./backend/code/cmd/controller
+cd backend/code
 ```
 
-默认监听地址是：
+后面的 `go run ./cmd/...`、`go test ./...` 都以这个目录为基准。
 
-```text
-http://127.0.0.1:8080
+## 启动前先理解的 4 个点
+
+1. Controller 既提供 HTTP API，也会同时启动 UDP Relay。
+2. Dashboard 登录、Node 注册和 P2P / Relay 建链都依赖当前进程里的配置值。
+3. 如果你还在使用默认账号、默认 JWT、默认 PSK、默认 Relay 公网地址，程序启动时会主动打印警告。
+4. 真实多机联调时，最容易填错的是 `NETWEAVER_RELAY_ADDR`。如果不填公网 / 局域网可达地址，节点可能会把 Relay 当成自己本机。
+
+## 推荐环境变量
+
+真实部署或多机联调前，建议至少设置这些环境变量：
+
+```bash
+export NETWEAVER_DASHBOARD_USERNAME=admin
+export NETWEAVER_DASHBOARD_PASSWORD='请换成你们自己的密码'
+export NETWEAVER_JWT_SECRET='请换成你们自己的 JWT 密钥'
+export NETWEAVER_NODE_PSK='请换成你们自己的节点 PSK'
+export NETWEAVER_RELAY_ADDR='控制器所在机器的真实可达 IP'
+export NETWEAVER_RELAY_PORT=9000
+export NETWEAVER_STUN_SERVERS='stun.l.google.com:19302,stun1.l.google.com:19302,stun2.l.google.com:19302'
 ```
 
-测试服务是否正常：
+说明：
+
+- `NETWEAVER_RELAY_ADDR` 是节点收到的 Relay 公网地址，不是监听地址写法。
+- `NETWEAVER_RELAY_PORT` 对应 Controller 里 UDP Relay 的端口。
+- `NETWEAVER_STUN_SERVERS` 可以继续用默认值，也可以改成你们自己的 STUN 方案。
+
+## 启动 Controller
+
+进入后端目录：
+
+```bash
+cd backend/code
+```
+
+启动 Controller：
+
+```bash
+go run ./cmd/controller
+```
+
+默认行为：
+
+- HTTP 监听 `:8080`
+- UDP Relay 监听 `:9000`
+- Dashboard 接口和 Node 接口都由这个进程提供
+
+如果要改监听端口：
+
+```bash
+go run ./cmd/controller -addr :9090 -relay-addr :9100
+```
+
+## 验证 Controller 是否启动成功
+
+测试健康检查：
 
 ```bash
 curl http://127.0.0.1:8080/ping
 ```
 
-正常会返回类似：
+预期返回：
 
 ```json
 {"msg":"pong"}
 ```
 
-查看节点列表：
+测试登录接口是否存在：
 
 ```bash
-curl http://127.0.0.1:8080/api/v1/dashboard/nodes
-```
-
-查看全局统计：
-
-```bash
-curl http://127.0.0.1:8080/api/v1/dashboard/stats
-```
-
-注册一个节点：
-
-```bash
-curl -X POST http://127.0.0.1:8080/api/v1/nodes/register \
+curl -X POST http://127.0.0.1:8080/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"machine_id":"e4:5f:01:aa:bb:cc","hostname":"ubuntu-server-01","os":"linux","local_ip":"192.168.1.10"}'
+  -d '{"username":"admin","password":"change-me"}'
 ```
 
-节点心跳：
+如果你已经修改了环境变量，这里就把账号密码换成你自己的值。
+
+## Dashboard 当前使用的接口
+
+前端控制台当前会用到这些接口：
+
+- `POST /api/v1/auth/login`
+- `GET /api/v1/dashboard/stats`
+- `GET /api/v1/dashboard/nodes`
+- `GET /api/v1/dashboard/edges`
+- `GET /api/v1/dashboard/nodes/{node_id}/metrics?target_id={target_id}&time_range=1h|12h|24h`
+
+注意：
+
+- 登录接口不需要 JWT。
+- `dashboard/*` 接口需要 `Authorization: Bearer <jwt>`。
+- `nodes/*` 节点接口需要 `Authorization: Bearer <psk>`。
+
+## 启动 Node 运行模式
+
+Node 真正接 Controller 联调时，请使用 `run` 子命令。
+
+基本写法：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/api/v1/nodes/{node_id}/heartbeat \
-  -H "Content-Type: application/json" \
-  -d '{"nat_type":"Full Cone","public_ip":"203.0.113.5","public_port":54321,"current_rx_bytes":1024560,"current_tx_bytes":2048000}'
+cd backend/code
+go run ./cmd/node run -controller http://127.0.0.1:8080
 ```
 
-拉取对等节点：
+更完整的常用写法：
 
 ```bash
-curl http://127.0.0.1:8080/api/v1/nodes/{node_id}/peers
+go run ./cmd/node run \
+  -controller http://127.0.0.1:8080 \
+  -hostname node-a \
+  -local-ip 192.168.1.10 \
+  -data-addr 0.0.0.0:0 \
+  -tun-name tuno
 ```
 
-如果需要更换端口，例如监听 `9090`：
+常见参数说明：
+
+- `-controller`：Controller 的 HTTP 地址
+- `-machine-id`：稳定机器标识；不填时会自动推导
+- `-hostname`：节点显示名称
+- `-local-ip`：节点本机内网地址
+- `-nat-type`：手动覆盖 NAT 类型；默认 `Unknown`
+- `-public-ip` / `-public-port`：手动上报公网地址；通常可不填
+- `-stun-servers`：覆盖 STUN 列表；默认会读取 `NETWEAVER_STUN_SERVERS`
+- `-psk`：覆盖节点 PSK；默认会读取 `NETWEAVER_NODE_PSK`
+- `-tun`：是否启用 TUN 数据面，默认 `true`
+- `-tun-name`：TUN 网卡名，默认 `tuno`
+
+## TUN 模式说明
+
+当前项目里，Node `run` 模式默认会尝试打开 TUN 数据面。
+
+这意味着：
+
+- 如果当前机器没有 TUN 权限，节点仍然可能注册成功并显示在线。
+- 但这不代表数据面一定可用。
+- 程序会在日志里打印 `TUN data plane disabled: ...` 或 `TUN data plane enabled: ...`。
+
+如果你只是先验证控制面联调，可以临时关闭 TUN：
 
 ```bash
-go run ./backend/code/cmd/controller -addr :9090
+go run ./cmd/node run -controller http://127.0.0.1:8080 -tun=false
 ```
 
-## 运行 P2P 节点
+如果你要真正验证 TUN 数据面，请确保当前 Linux / WSL / 容器环境允许创建 TUN，并按日志提示配置虚拟网卡地址。
 
-`cmd/node` 支持 `p2p` 模式。需要打开两个终端分别启动 NodeA 和 NodeB。
+## P2P 实验模式
+
+`p2p` 模式是独立的 UDP 双节点实验，不接 Controller。
 
 终端 1：
 
 ```bash
-cd /home/xyc20060125/projects/temp/NetWeaver
-go run ./backend/code/cmd/node p2p -profile A
+cd backend/code
+go run ./cmd/node p2p -profile A
 ```
 
 终端 2：
 
 ```bash
-cd /home/xyc20060125/projects/temp/NetWeaver
-go run ./backend/code/cmd/node p2p -profile B
+cd backend/code
+go run ./cmd/node p2p -profile B
 ```
 
-默认配置：
+## 编译检查
 
-- NodeA 监听 `127.0.0.1:9001`
-- NodeB 监听 `127.0.0.1:9002`
-- 两边每隔 2 秒互相发送 `"Hello"`
-
-也可以手动指定节点参数：
+在 `backend/code` 目录下执行：
 
 ```bash
-go run ./backend/code/cmd/node p2p \
-  -name MyNode \
-  -local 127.0.0.1:9010 \
-  -peer 127.0.0.1:9011 \
-  -message "hi" \
-  -interval 1s
+go test ./...
 ```
 
-## 运行 TUN 模式
+当前仓库测试文件不多，但这个命令至少可以验证所有 Go 包是否还能正常编译。
 
-如果只是运行普通 HTTP 后端，可以先不用管 TUN 模式。
+## 多机联调最容易填错的地方
 
-TUN 模式会创建虚拟网卡，通常需要 `sudo` 或 `NET_ADMIN` 权限。
-
-一次性初始化：
-
-```bash
-cd /home/xyc20060125/projects/temp/NetWeaver
-sudo /usr/local/go/bin/go run ./backend/code/cmd/node -bootstrap -ifname tuno
-```
-
-然后配置网卡：
-
-```bash
-sudo ip addr add 10.23.0.1/24 dev tuno
-sudo ip link set tuno up
-```
-
-之后普通运行：
-
-```bash
-go run ./backend/code/cmd/node -ifname tuno
-```
-
-也可以直接以 root 权限运行：
-
-```bash
-sudo /usr/local/go/bin/go run ./backend/code/cmd/node
-```
-
-## 配置 Go PATH
-
-Go 1.24.0 已安装在 `/usr/local/go`，并且本机 shell 配置已经把 `/usr/local/go/bin` 加入 `PATH`。
-
-如果旧终端里还找不到 `go`，重新打开终端，或者手动加载配置：
-
-```bash
-source ~/.profile
-```
-
-确认版本：
-
-```bash
-go version
-```
-
-## 编译验证
-
-检查整个项目是否能正常编译：
-
-```bash
-cd /home/xyc20060125/projects/temp/NetWeaver
-go test ./backend/code/...
-```
-
-当前项目没有测试文件，但该命令可以确认所有包都能正常编译。
+1. 前端请求的后端地址，要填 Controller 的 HTTP 地址，例如 `http://192.168.1.23:8080`。
+2. Node `-controller` 参数，也要填同一个 Controller HTTP 地址。
+3. `NETWEAVER_RELAY_ADDR` 要填 Controller 所在机器对其他节点可达的真实 IP，不能继续写 `127.0.0.1`。
+4. 节点侧 `-local-ip` 应该尽量填写当前机器真实参与联调的网卡 IP，避免上报错误地址。
+5. 如果图上看到节点在线但没有链路，优先检查 STUN、Relay 地址、PSK 和 TUN 日志，而不是先怀疑前端页面。

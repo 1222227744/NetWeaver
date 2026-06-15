@@ -62,7 +62,7 @@ func Run(ctx context.Context, args []string) error {
 	natType := fs.String("nat-type", protocol.DefaultNATType, "NAT type reported to controller")
 	publicIP := fs.String("public-ip", "", "public IP reported in heartbeat; default lets controller infer it")
 	publicPort := fs.Int("public-port", 0, "public port reported in heartbeat")
-	stunServers := fs.String("stun-servers", config.DefaultSTUNServers, "comma-separated STUN endpoints")
+	stunServers := fs.String("stun-servers", config.STUNServers(), "comma-separated STUN endpoints")
 	dataListenAddr := fs.String("data-addr", "0.0.0.0:0", "UDP address used for STUN, P2P punch and data plane")
 	psk := fs.String("psk", config.NodePSK(), "node pre-shared key for controller node APIs")
 	tunEnabled := fs.Bool("tun", true, "enable TUN data plane in run mode")
@@ -82,6 +82,14 @@ func Run(ctx context.Context, args []string) error {
 	}
 	if *tunBufferSize <= 0 {
 		return fmt.Errorf("invalid -tun-buf: %d", *tunBufferSize)
+	}
+
+	if strings.TrimSpace(*psk) == config.DefaultNodePSK {
+		log.Printf("warning: node is still using the development PSK; set -psk or %s before real deployment", config.EnvNodePSK)
+	}
+
+	if strings.TrimSpace(*stunServers) == config.DefaultSTUNServers {
+		log.Printf("warning: node is still using the default public STUN list; set -stun-servers or %s if your environment needs a dedicated STUN plan", config.EnvSTUNServers)
 	}
 
 	resolvedHostname := strings.TrimSpace(*hostname)
