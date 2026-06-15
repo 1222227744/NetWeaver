@@ -1,7 +1,11 @@
 package api
 
 import (
+	"io/fs"
 	"net/http"
+	"os"
+	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +21,10 @@ type Server struct {
 }
 
 func NewRouter(registry *state.Registry) *gin.Engine {
+	return NewRouterWithConsole(registry, "", "/console")
+}
+
+func NewRouterWithConsole(registry *state.Registry, consoleDir string, consoleBase string) *gin.Engine {
 	server := &Server{registry: registry}
 
 	r := gin.Default()
@@ -50,7 +58,61 @@ func NewRouter(registry *state.Registry) *gin.Engine {
 		}
 	}
 
+	registerConsoleStatic(r, strings.TrimSpace(consoleDir), normalizeConsoleBase(consoleBase))
+
 	return r
+}
+
+func registerConsoleStatic(r *gin.Engine, consoleDir string, consoleBase string) {
+	if consoleDir == "" {
+		return
+	}
+
+	absDir, err := filepath.Abs(consoleDir)
+	if err != nil {
+		return
+	}
+
+	indexPath := filepath.Join(absDir, "index.html")
+	if _, err := os.Stat(indexPath); err != nil {
+		return
+	}
+
+	assetsDir := filepath.Join(absDir, "assets")
+	if _, err := os.Stat(assetsDir); err == nil {
+		assetsRoute := path.Join(consoleBase, "assets")
+		r.StaticFS(assetsRoute, os.DirFS(assetsDir))
+	}
+
+	serveIndex := func(c *gin.Context) {
+		c.File(indexPath)
+	}
+
+	r.GET(consoleBase, serveIndex)
+	r.GET(consoleBase+"/", serveIndex)
+	r.GET(path.Join(consoleBase, "index.html"), serveIndex)
+
+	if consoleFiles, err := fs.Sub(os.DirFS(absDir), "."); err == nil {
+		r.StaticFS(consoleBase, consoleFiles)
+	}
+}
+
+func normalizeConsoleBase(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "/console"
+	}
+
+	if !strings.HasPrefix(trimmed, "/") {
+		trimmed = "/" + trimmed
+	}
+
+	trimmed = strings.TrimRight(trimmed, "/")
+	if trimmed == "" {
+		return "/console"
+	}
+
+	return trimmed
 }
 
 func (s *Server) Ping(c *gin.Context) {

@@ -59,17 +59,17 @@ func Run(args []string) error {
 		defer dev.Close()
 		log.Printf("bootstrap success: %s is persistent now", devName)
 		log.Printf("one-time network setup (root):")
-		log.Printf("  sudo ip addr add 10.23.0.1/24 dev %s", devName)
+		log.Printf("  sudo ip addr add 10.23.0.1/16 dev %s", devName)
 		log.Printf("  sudo ip link set %s up", devName)
 		log.Printf("then run as normal user:")
-		log.Printf("  /usr/local/go/bin/go run ./cmd/node -ifname %s", devName)
+		log.Printf("  /usr/local/go/bin/go run ./cmd/node run -tun-name %s -tun-auto-config -tun-auto-cleanup", devName)
 		return nil
 	}
 	defer dev.Close()
 
 	log.Printf("TUN ready: %s", devName)
 	log.Printf("Linux setup example:")
-	log.Printf("  sudo ip addr add 10.23.0.1/24 dev %s", devName)
+	log.Printf("  sudo ip addr add 10.23.0.1/16 dev %s", devName)
 	log.Printf("  sudo ip link set %s up", devName)
 	log.Printf("  ping -I %s -c 4 10.23.0.2", devName)
 
@@ -202,14 +202,14 @@ func tunCreateHints(err error, ifName string) string {
 	switch {
 	case errors.Is(err, syscall.EPERM), errors.Is(err, os.ErrPermission):
 		b.WriteString("1) Recommended one-time bootstrap (root), then run without sudo:\n")
-		b.WriteString(fmt.Sprintf("   `sudo /usr/local/go/bin/go run ./cmd/node -bootstrap -ifname %s`\n", ifName))
-		b.WriteString(fmt.Sprintf("   `/usr/local/go/bin/go run ./cmd/node -ifname %s`\n", ifName))
+		b.WriteString(fmt.Sprintf("   `sudo /usr/local/go/bin/go run ./cmd/node tun -bootstrap -ifname %s`\n", ifName))
+		b.WriteString(fmt.Sprintf("   `/usr/local/go/bin/go run ./cmd/node run -tun-name %s -tun-auto-config -tun-auto-cleanup`\n", ifName))
 		b.WriteString("2) Or run with NET_ADMIN privilege each time:\n")
-		b.WriteString("   `sudo /usr/local/go/bin/go run ./cmd/node`\n")
+		b.WriteString("   `sudo /usr/local/go/bin/go run ./cmd/node run -tun-auto-config`\n")
 		b.WriteString("3) Or build once and grant capability to the binary (go run temp binaries cannot keep this capability):\n")
 		b.WriteString("   `/usr/local/go/bin/go build -o node ./cmd/node`\n")
 		b.WriteString("   `sudo setcap cap_net_admin+ep ./node`\n")
-		b.WriteString("   `./node`\n")
+		b.WriteString(fmt.Sprintf("   `./node run -tun-name %s -tun-auto-config -tun-auto-cleanup`\n", ifName))
 		b.WriteString("4) In Docker, start container with: `--cap-add=NET_ADMIN --device /dev/net/tun`\n")
 	case errors.Is(err, syscall.ENOENT):
 		b.WriteString("1) `/dev/net/tun` is missing. Ensure TUN module is loaded:\n")

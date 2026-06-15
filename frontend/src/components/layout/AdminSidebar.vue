@@ -12,6 +12,7 @@ defineProps<{
 
 // defineEmits 用来声明“我要向父组件发什么消息”。
 // 这里当用户点击菜单时，会通知父组件更新当前激活菜单。
+// 当前这个菜单值同时还是“页内导航锚点”的 key。
 const emit = defineEmits<{
   (event: 'update:activeMenu', value: string): void
 }>()
@@ -30,7 +31,7 @@ const handleSelect = (menuKey: string) => {
     1. 展示导航分组
     2. 高亮当前菜单
     3. 把点击结果通知给父组件
-    它自己不负责切页面，因为项目当前还没有接 vue-router。
+    当前点击后会滚动到页面中的对应区块，不是假页面跳转。
   -->
   <aside
     class="relative flex h-full w-[17.5rem] flex-col overflow-hidden rounded-[2rem] bg-[linear-gradient(180deg,#0f172a_0%,#111827_45%,#0f3d39_100%)] p-4 text-slate-100"
@@ -57,7 +58,8 @@ const handleSelect = (menuKey: string) => {
             {{ group.title }}
           </p>
 
-          <!-- 菜单当前只负责展示结构，后续接入 vue-router 时可把 index 改为 path/name -->
+          <!-- 菜单当前对应的是页内区块。
+               如果以后真的接入 vue-router，再把 index 改为 path/name 即可。 -->
           <el-menu
             :default-active="activeMenu"
             class="admin-menu"
@@ -68,6 +70,7 @@ const handleSelect = (menuKey: string) => {
               v-for 的意思是“循环渲染”。
               group.items 里有几个菜单对象，这里就会生成几个菜单项。
               :index 可以理解成“这个菜单项的唯一编号”。
+              这里它还兼任“要滚动到哪个区块”的锚点 key。
             -->
             <el-menu-item v-for="item in group.items" :key="item.index" :index="item.index">
               <el-icon class="text-base">

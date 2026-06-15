@@ -32,6 +32,7 @@ const (
 	EnvNodePSK           = "NETWEAVER_NODE_PSK"
 	EnvRelayAddr         = "NETWEAVER_RELAY_ADDR"
 	EnvRelayPort         = "NETWEAVER_RELAY_PORT"
+	EnvSTUNServers       = "NETWEAVER_STUN_SERVERS"
 )
 
 func DashboardUsername() string {
@@ -48,6 +49,10 @@ func JWTSecret() string {
 
 func NodePSK() string {
 	return EnvOrDefault(EnvNodePSK, DefaultNodePSK)
+}
+
+func STUNServers() string {
+	return EnvOrDefault(EnvSTUNServers, DefaultSTUNServers)
 }
 
 func RelayAddr() string {
@@ -72,4 +77,20 @@ func EnvOrDefault(key string, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func UsesDefaultDashboardCredential() bool {
+	return DashboardUsername() == DefaultDashboardUsername && DashboardPassword() == DefaultDashboardPassword
+}
+
+func UsesDefaultJWTSecret() bool {
+	return JWTSecret() == DefaultJWTSecret
+}
+
+func UsesDefaultNodePSK() bool {
+	return NodePSK() == DefaultNodePSK
+}
+
+func UsesDefaultSTUNServers() bool {
+	return STUNServers() == DefaultSTUNServers
 }

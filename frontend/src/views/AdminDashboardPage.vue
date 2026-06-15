@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Connection, Grid, Monitor } from '@element-plus/icons-vue'
-import { ref } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 
 import OnlineNodeTable from '@/components/dashboard/OnlineNodeTable.vue'
 import AdminShell from '@/components/layout/AdminShell.vue'
@@ -18,20 +18,33 @@ import type { SidebarMenuGroup } from '@/components/layout/layout.types'
 // 2. 提供侧边栏菜单数据
 
 // activeMenu 表示当前高亮的菜单。
-// ref('dashboard') 的意思是：默认先高亮 dashboard 这个菜单。
+// 这里的值不再只是“视觉高亮”，而是和页面里的 section 锚点一一对应。
+// 例如 activeMenu === 'topology' 时，表示应该滚动到拓扑区块。
 const activeMenu = ref('dashboard')
 
-// 这里先用本地常量模拟后台菜单，后续接路由时可把 index 改成 route name/path。
+// 这里先做“页内导航菜单”。
+// index 就是页面区块的锚点 key，不再是假装切页面的占位值。
 const menuGroups: SidebarMenuGroup[] = [
   {
     title: '网络',
     items: [
-      { index: 'dashboard', label: '概览面板', icon: Grid },
-      { index: 'monitor', label: '在线节点', icon: Monitor },
-      { index: 'links', label: '链路拓扑', icon: Connection }
+      { index: 'dashboard', label: '控制台概览', icon: Grid },
+      { index: 'topology', label: '链路拓扑', icon: Connection },
+      { index: 'nodes', label: '节点列表', icon: Monitor }
     ]
   }
 ]
+
+const scrollToSection = async (sectionKey: string) => {
+  await nextTick()
+
+  const target = document.querySelector<HTMLElement>(`[data-admin-section="${sectionKey}"]`)
+  target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+watch(activeMenu, (sectionKey) => {
+  void scrollToSection(sectionKey)
+})
 </script>
 
 <template>

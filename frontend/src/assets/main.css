@@ -10,8 +10,6 @@
   /* 这里放全局的基础视觉设置，整个页面都会继承。
      可以把 :root 理解成“整个网页的默认设定中心”。 */
   --theme-hue: 174;
-  --cursor-x: 50vw;
-  --cursor-y: 50vh;
 
   /* 下面这些 --app-* 都是本项目自己的主题变量。
      顶部主题滑条只改变 --theme-hue，其他颜色会跟着自动推导出来。
@@ -35,7 +33,6 @@
   --app-text: #0f172a;
   --app-text-soft: #334155;
   --app-text-muted: #64748b;
-  --cursor-blend-mode: multiply;
 
   /* Element Plus 会读取 --el-* 变量。
      这里把它们接到我们的主题变量上，按钮、输入框、表格会跟着换色。 */
@@ -217,59 +214,10 @@ select {
     border-color 0.45s ease;
 }
 
-/* 全局鼠标光晕。
-   它只负责视觉提示，不拦截鼠标事件，所以不会影响点击、拖拽、输入。 */
-.cursor-effects {
-  pointer-events: none;
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  opacity: 0;
-  mix-blend-mode: var(--cursor-blend-mode);
-  transition: opacity 0.18s ease;
-}
-
-.cursor-effects.is-visible {
-  opacity: 0.58;
-}
-
-.cursor-effects__glow,
-.cursor-effects__ring {
-  position: absolute;
-  left: 0;
-  top: 0;
-  border-radius: 999px;
-  will-change: transform;
-}
-
-.cursor-effects__glow {
-  width: 2.25rem;
-  height: 2.25rem;
-  background: radial-gradient(circle, var(--app-primary-glow-strong), var(--app-primary-glow) 32%, transparent 62%);
-  filter: blur(1.5px);
-  transform: translate3d(var(--cursor-x), var(--cursor-y), 0) translate(-50%, -50%);
-}
-
-.cursor-effects__ring {
-  width: 0.72rem;
-  height: 0.72rem;
-  border: 1px solid var(--app-primary);
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.1),
-    0 0 4px var(--app-primary-glow-strong);
-  transform: translate3d(var(--cursor-x), var(--cursor-y), 0) translate(-50%, -50%);
-}
-
-@media (pointer: coarse) {
-  .cursor-effects {
-    display: none;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   body,
   .panel-surface,
-  .cursor-effects {
+  .panel-surface * {
     transition: none;
   }
 }

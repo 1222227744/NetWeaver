@@ -36,6 +36,9 @@ type Config struct {
 	PSK               string
 	TUNEnabled        bool
 	TUNName           string
+	TUNAutoConfig     bool
+	TUNAutoCleanup    bool
+	TUNPrefixLen      int
 	TUNBufferSize     int
 	HeartbeatInterval time.Duration
 	PeerInterval      time.Duration
@@ -51,6 +54,8 @@ type Agent struct {
 	tunMu     sync.RWMutex
 	tunDev    io.ReadWriteCloser
 	tunName   string
+	tunPrefix int
+	tunAuto   bool
 }
 
 func Run(ctx context.Context, args []string) error {
@@ -62,11 +67,14 @@ func Run(ctx context.Context, args []string) error {
 	natType := fs.String("nat-type", protocol.DefaultNATType, "NAT type reported to controller")
 	publicIP := fs.String("public-ip", "", "public IP reported in heartbeat; default lets controller infer it")
 	publicPort := fs.Int("public-port", 0, "public port reported in heartbeat")
-	stunServers := fs.String("stun-servers", config.DefaultSTUNServers, "comma-separated STUN endpoints")
+	stunServers := fs.String("stun-servers", config.STUNServers(), "comma-separated STUN endpoints")
 	dataListenAddr := fs.String("data-addr", "0.0.0.0:0", "UDP address used for STUN, P2P punch and data plane")
 	psk := fs.String("psk", config.NodePSK(), "node pre-shared key for controller node APIs")
 	tunEnabled := fs.Bool("tun", true, "enable TUN data plane in run mode")
 	tunName := fs.String("tun-name", config.DefaultTUNName, "TUN interface used for data plane")
+	tunAutoConfig := fs.Bool("tun-auto-config", false, "auto-assign virtual IP and bring up the TUN interface after registration")
+	tunAutoCleanup := fs.Bool("tun-auto-cleanup", false, "remove the auto-assigned virtual IP and bring the TUN interface down when the node exits")
+	tunPrefixLen := fs.Int("tun-prefix", defaultTUNPrefixLen(), "prefix length used by -tun-auto-config")
 	tunBufferSize := fs.Int("tun-buf", 65535, "TUN packet read buffer size")
 	heartbeatInterval := fs.Duration("interval", config.DefaultHeartbeatInterval, "heartbeat interval")
 	peerInterval := fs.Duration("peer-interval", config.DefaultHeartbeatInterval, "peer sync interval")
@@ -83,6 +91,22 @@ func Run(ctx context.Context, args []string) error {
 	if *tunBufferSize <= 0 {
 		return fmt.Errorf("invalid -tun-buf: %d", *tunBufferSize)
 	}
+	if *tunPrefixLen <= 0 || *tunPrefixLen > 32 {
+		return fmt.Errorf("invalid -tun-prefix: %d", *tunPrefixLen)
+	}
+	if *tunAutoCleanup && !*tunAutoConfig {
+		return fmt.Errorf("-tun-auto-cleanup requires -tun-auto-config")
+	}
+
+	if strings.TrimSpace(*psk) == config.DefaultNodePSK {
+		log.Printf("warning: node is still using the development PSK; set -psk or %s before real deployment", config.EnvNodePSK)
+	}
+
+	if strings.TrimSpace(*stunServers) == config.DefaultSTUNServers {
+		log.Printf("warning: node is still using the default public STUN list; set -stun-servers or %s if your environment needs a dedicated STUN plan", config.EnvSTUNServers)
+	}
+
+	logWSLP2PHints(strings.TrimSpace(*dataListenAddr), *tunAutoConfig)
 
 	resolvedHostname := strings.TrimSpace(*hostname)
 	if resolvedHostname == "" {
@@ -112,6 +136,9 @@ func Run(ctx context.Context, args []string) error {
 		PSK:               strings.TrimSpace(*psk),
 		TUNEnabled:        *tunEnabled,
 		TUNName:           strings.TrimSpace(*tunName),
+		TUNAutoConfig:     *tunAutoConfig,
+		TUNAutoCleanup:    *tunAutoCleanup,
+		TUNPrefixLen:      *tunPrefixLen,
 		TUNBufferSize:     *tunBufferSize,
 		HeartbeatInterval: *heartbeatInterval,
 		PeerInterval:      *peerInterval,
@@ -141,6 +168,9 @@ func New(cfg Config) *Agent {
 	}
 	if cfg.TUNName == "" {
 		cfg.TUNName = config.DefaultTUNName
+	}
+	if cfg.TUNPrefixLen <= 0 {
+		cfg.TUNPrefixLen = defaultTUNPrefixLen()
 	}
 	if cfg.TUNBufferSize <= 0 {
 		cfg.TUNBufferSize = 65535
@@ -223,16 +253,71 @@ func (a *Agent) startTUNDataPlane(ctx context.Context) {
 	a.tunMu.Lock()
 	a.tunDev = device.ReadWriteCloser
 	a.tunName = device.Name
+	a.tunPrefix = a.cfg.TUNPrefixLen
+	a.tunAuto = false
 	a.tunMu.Unlock()
 
+	if a.cfg.TUNAutoConfig {
+		if err := configureTUNInterface(device.Name, a.virtualIP, a.cfg.TUNPrefixLen); err != nil {
+			a.tunMu.Lock()
+			a.tunDev = nil
+			a.tunName = ""
+			a.tunPrefix = 0
+			a.tunAuto = false
+			a.tunMu.Unlock()
+			_ = device.Close()
+			log.Printf("TUN data plane disabled: auto-config failed: %v", err)
+			return
+		}
+
+		a.tunMu.Lock()
+		a.tunAuto = true
+		a.tunMu.Unlock()
+		log.Printf("TUN auto-config applied: ifname=%s cidr=%s/%d", device.Name, a.virtualIP, a.cfg.TUNPrefixLen)
+	}
+
 	log.Printf("TUN data plane enabled: ifname=%s virtual_ip=%s", device.Name, a.virtualIP)
-	log.Printf("TUN setup reminder: sudo ip addr add %s/16 dev %s && sudo ip link set %s up", a.virtualIP, device.Name, device.Name)
+	if a.cfg.TUNAutoConfig {
+		if a.cfg.TUNAutoCleanup {
+			log.Printf("TUN auto-cleanup enabled: interface %s will be cleaned on process exit", device.Name)
+		}
+	} else {
+		log.Printf("TUN setup reminder: sudo ip addr add %s/%d dev %s && sudo ip link set %s up", a.virtualIP, a.cfg.TUNPrefixLen, device.Name, device.Name)
+		log.Printf("tip: add -tun-auto-config to let node configure the TUN interface automatically")
+	}
 
 	go func() {
 		<-ctx.Done()
+		if err := a.cleanupTUNInterface(); err != nil {
+			log.Printf("TUN auto-cleanup failed: %v", err)
+		}
 		_ = device.Close()
 	}()
 	go a.tunReadLoop(ctx, device)
+}
+
+func (a *Agent) cleanupTUNInterface() error {
+	if !a.cfg.TUNAutoCleanup {
+		return nil
+	}
+
+	a.tunMu.Lock()
+	ifName := a.tunName
+	prefixLen := a.tunPrefix
+	shouldCleanup := a.tunAuto
+	a.tunAuto = false
+	a.tunMu.Unlock()
+
+	if !shouldCleanup || ifName == "" || a.virtualIP == "" || prefixLen <= 0 {
+		return nil
+	}
+
+	if err := cleanupTUNInterface(ifName, a.virtualIP, prefixLen); err != nil {
+		return err
+	}
+
+	log.Printf("TUN auto-cleanup applied: ifname=%s cidr=%s/%d", ifName, a.virtualIP, prefixLen)
+	return nil
 }
 
 func (a *Agent) tunReadLoop(ctx context.Context, device *nodetun.Device) {
@@ -428,6 +513,30 @@ func defaultLocalIP() string {
 	}
 
 	return "127.0.0.1"
+}
+
+func logWSLP2PHints(dataAddr string, autoConfig bool) {
+	if !isWSLRuntime() {
+		return
+	}
+
+	log.Printf("WSL detected: P2P may still depend on mirrored networking, Windows firewall and NAT topology")
+	if strings.TrimSpace(dataAddr) == "0.0.0.0:0" {
+		log.Printf("WSL hint: prefer a fixed -data-addr such as 0.0.0.0:9101 so the node keeps a stable UDP port")
+	}
+	if autoConfig {
+		log.Printf("WSL hint: -tun-auto-config only automates the TUN interface; it cannot by itself guarantee P2P success")
+	}
+}
+
+func isWSLRuntime() bool {
+	data, err := os.ReadFile("/proc/sys/kernel/osrelease")
+	if err != nil {
+		return false
+	}
+
+	osRelease := strings.ToLower(string(data))
+	return strings.Contains(osRelease, "microsoft") || strings.Contains(osRelease, "wsl")
 }
 
 func defaultMachineID(hostname string, localIP string) string {

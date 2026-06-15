@@ -87,6 +87,15 @@ const timeRangeOptions: Array<{ label: string; value: DashboardMetricsTimeRange 
 
 const onlineNodes = computed(() => allNodes.value.filter((node) => node.status === 'online'))
 const offlineNodes = computed(() => allNodes.value.filter((node) => node.status === 'offline'))
+const sortedNodes = computed(() => {
+  return [...allNodes.value].sort((left, right) => {
+    if (left.status !== right.status) {
+      return left.status === 'online' ? -1 : 1
+    }
+
+    return left.hostname.localeCompare(right.hostname, 'zh-CN')
+  })
+})
 
 const isNodeListEmptyState = computed(() => {
   return !state.loading && !state.errorMessage && allNodes.value.length === 0
@@ -539,7 +548,7 @@ onBeforeUnmount(() => {
     </section>
 
     <template v-else>
-      <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section class="grid scroll-mt-28 gap-4 md:grid-cols-2 xl:grid-cols-4" data-admin-section="dashboard">
         <article class="panel-surface p-5">
           <div class="flex items-start justify-between gap-4">
             <div>
@@ -633,75 +642,83 @@ onBeforeUnmount(() => {
         />
       </section>
 
-      <NodeRelationGraph
-        :edges="graphEdges"
-        :metrics="selectedLinkMetrics"
-        :metrics-loading="state.metricsLoading"
-        :nodes="allNodes"
-        :selected-time-range="selectedTimeRange"
-        @link-hover="handleGraphLinkHover"
-      />
-
-      <section class="panel-surface p-6">
-        <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h2 class="text-xl font-semibold text-slate-900">节点列表</h2>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-3">
-            <el-tag round type="success">在线 {{ onlineNodes.length }} 台</el-tag>
-            <el-tag round type="info">离线 {{ offlineNodes.length }} 台</el-tag>
-            <el-tag round>总计 {{ allNodes.length }} 台</el-tag>
-          </div>
-        </div>
-
-        <el-alert
-          v-if="hasOnlyOfflineNodes"
-          class="mt-6"
-          type="warning"
-          show-icon
-          :closable="false"
-          title="当前没有在线节点。列表保留离线节点，便于核对 status、last_seen 和虚拟 IP。"
+      <section class="grid gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(26rem,1fr)] xl:items-start">
+        <NodeRelationGraph
+          :edges="graphEdges"
+          :metrics="selectedLinkMetrics"
+          :metrics-loading="state.metricsLoading"
+          :nodes="allNodes"
+          :selected-time-range="selectedTimeRange"
+          @link-hover="handleGraphLinkHover"
         />
 
-        <el-empty
-          v-if="isNodeListEmptyState"
-          class="mt-6 rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50"
-          description="当前还没有任何节点"
-        />
+        <section class="panel-surface h-full scroll-mt-28 p-6" data-admin-section="nodes">
+          <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 class="text-xl font-semibold text-slate-900">节点列表</h2>
+              <p class="mt-2 text-sm text-slate-500">
+                列表默认把在线节点排在前面，便于联调时先看当前还活着的机器，再看离线历史节点。
+              </p>
+            </div>
 
-        <el-table
-          v-loading="state.loading"
-          :data="allNodes"
-          stripe
-          border
-          class="mt-6"
-          empty-text="当前没有节点"
-        >
-          <el-table-column prop="node_id" label="节点 ID" min-width="180" />
-          <el-table-column prop="hostname" label="主机名" min-width="150" />
-          <el-table-column prop="virtual_ip" label="虚拟 IP" min-width="130" />
-          <el-table-column label="公网地址" min-width="170">
-            <template #default="{ row }">
-              {{ formatOptionalText(row.public_ip) }}:{{ formatOptionalText(row.public_port) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="nat_type" label="NAT 类型" min-width="170" />
-          <el-table-column prop="connected_peers" label="真实邻居数" min-width="110" align="center" />
-          <el-table-column label="最后心跳" min-width="180">
-            <template #default="{ row }">
-              {{ formatLastSeen(row.last_seen) }}
-            </template>
-          </el-table-column>
+            <div class="flex flex-wrap items-center gap-3">
+              <el-tag round type="success">在线 {{ onlineNodes.length }} 台</el-tag>
+              <el-tag round type="info">离线 {{ offlineNodes.length }} 台</el-tag>
+              <el-tag round>总计 {{ allNodes.length }} 台</el-tag>
+            </div>
+          </div>
 
-          <el-table-column label="状态" min-width="100" align="center">
-            <template #default="{ row }">
-              <el-tag round :type="getStatusTagType(row.status)">
-                {{ getStatusText(row.status) }}
-              </el-tag>
-            </template>
-          </el-table-column>
-        </el-table>
+          <el-alert
+            v-if="hasOnlyOfflineNodes"
+            class="mt-6"
+            type="warning"
+            show-icon
+            :closable="false"
+            title="当前没有在线节点。列表保留离线节点，便于核对 status、last_seen 和虚拟 IP。"
+          />
+
+          <el-empty
+            v-if="isNodeListEmptyState"
+            class="mt-6 rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50"
+            description="当前还没有任何节点"
+          />
+
+          <div v-else class="mt-6 overflow-x-auto rounded-[1.5rem]">
+            <el-table
+              v-loading="state.loading"
+              :data="sortedNodes"
+              stripe
+              border
+              class="min-w-[58rem]"
+              max-height="620"
+              empty-text="当前没有节点"
+            >
+              <el-table-column prop="node_id" label="节点 ID" min-width="180" />
+              <el-table-column prop="hostname" label="主机名" min-width="150" />
+              <el-table-column prop="virtual_ip" label="虚拟 IP" min-width="130" />
+              <el-table-column label="公网地址" min-width="170">
+                <template #default="{ row }">
+                  {{ formatOptionalText(row.public_ip) }}:{{ formatOptionalText(row.public_port) }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="nat_type" label="NAT 类型" min-width="170" />
+              <el-table-column prop="connected_peers" label="真实邻居数" min-width="110" align="center" />
+              <el-table-column label="最后心跳" min-width="180">
+                <template #default="{ row }">
+                  {{ formatLastSeen(row.last_seen) }}
+                </template>
+              </el-table-column>
+
+              <el-table-column label="状态" min-width="100" align="center">
+                <template #default="{ row }">
+                  <el-tag round :type="getStatusTagType(row.status)">
+                    {{ getStatusText(row.status) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </section>
       </section>
     </template>
   </div>

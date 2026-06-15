@@ -13,6 +13,10 @@ interface ImportMetaEnv {
   // 如果这里有值，axios 会直接请求这个地址。
   readonly VITE_API_BASE_URL?: string
 
+  // 前端构建后的静态资源 base。
+  // 服务器部署时，如果 controller 托管控制台页面，通常会把它设成 /console/。
+  readonly VITE_APP_BASE?: string
+
   // Vite 开发服务器的代理目标地址。
   // 本项目当前更推荐改这个变量，因为这样浏览器仍然请求 /api/...，
   // 由 Vite 在开发阶段帮我们转发到真实后端。
