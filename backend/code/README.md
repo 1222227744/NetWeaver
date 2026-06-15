@@ -225,6 +225,145 @@ go test ./...
 
 当前仓库测试文件不多，但这个命令至少可以验证所有 Go 包是否还能正常编译。
 
+## 服务器一键部署
+
+如果你们已经准备把 Controller 和前端控制台一起放到 Linux 服务器上，当前仓库已经提供一套最小可用的一键部署脚本。
+
+推荐流程：
+
+```bash
+cd NetWeaver
+bash scripts/deploy_server.sh
+```
+
+这个脚本会做这些事：
+
+- 检查服务器上是否有 `go` 和 `npm`
+- 在 `backend/code` 下执行 `go test ./...`
+- 编译 `controller` 可执行文件
+- 在 `frontend` 下执行 `npm ci` 和生产构建
+- 生成服务器部署目录 `deploy/server/`
+- 自动生成环境变量模板 `deploy/server/netweaver-server.env`
+- 自动生成启动脚本 `deploy/server/run/start-controller.sh`
+- 自动生成可选的 `systemd` unit 文件 `deploy/server/netweaver-controller.service`
+
+### 部署产物目录
+
+脚本跑完后，主要关注这些目录：
+
+- `deploy/server/controller/bin/netweaver-controller`
+- `deploy/server/console/web/`
+- `deploy/server/netweaver-server.env`
+- `deploy/server/run/start-controller.sh`
+
+### controller 托管前端控制台
+
+当前 `controller` 已支持通过参数托管前端静态页面：
+
+```bash
+./netweaver-controller \
+  -addr :8080 \
+  -relay-addr :9000 \
+  -console-dir /path/to/console/web \
+  -console-base /console
+```
+
+这意味着：
+
+- API 仍然走 `/api/v1/...`
+- Relay 仍然由同一个进程提供
+- 前端控制台页面会挂在 `http://<server-ip>:8080/console/`
+- 不需要再额外启动一个 `vite preview` 或 Python 静态文件服务器
+
+### 环境变量文件
+
+首次执行 `scripts/deploy_server.sh` 时，如果 `deploy/server/netweaver-server.env` 不存在，脚本会自动生成模板。
+
+这套部署方式的分工是：
+
+- `scripts/deploy_server.sh` 负责读取环境变量、执行编译、生成部署目录和启动脚本。
+- `deploy/server/netweaver-server.env` 负责保存你们自己的服务器配置。
+
+也就是说，脚本和 `.env` 文件是配合使用的，不是二选一。
+
+严格来说，当前后端大多数配置都有默认值，所以“代码层面”并不是不填就一定启动失败。
+但从真实联调和落地角度看，下面这些项已经可以分成“必须改”和“可按需改”。
+
+#### 多机部署前必须修改
+
+- `NETWEAVER_DASHBOARD_PASSWORD`
+- `NETWEAVER_JWT_SECRET`
+- `NETWEAVER_NODE_PSK`
+- `NETWEAVER_RELAY_ADDR`
+
+原因：
+
+- 前三项如果不改，系统虽然能跑，但仍然是在用开发默认密码和默认密钥，不适合真实部署。
+- `NETWEAVER_RELAY_ADDR` 如果不改成服务器真实可达 IP，其他机器上的节点可能会错误地把 Relay 当成它们自己的本机地址。
+
+#### 建议根据实际环境确认
+
+- `NETWEAVER_STUN_SERVERS`
+- `NETWEAVER_RELAY_PORT`
+- `NETWEAVER_RELAY_LISTEN`
+- `NETWEAVER_HTTP_ADDR`
+
+原因：
+
+- `NETWEAVER_STUN_SERVERS` 默认公共列表通常可用，但如果校园网、机房或目标环境有限制，就要换成你们自己的方案。
+- `NETWEAVER_RELAY_PORT` 是节点收到的 Relay 对外端口，通常要和 `NETWEAVER_RELAY_LISTEN` 的监听端口保持一致。
+- `NETWEAVER_HTTP_ADDR` 和 `NETWEAVER_RELAY_LISTEN` 是否要改，取决于你们服务器的端口规划。
+
+#### 可保留默认值，按需再改
+
+- `NETWEAVER_DASHBOARD_USERNAME`
+- `NETWEAVER_CONSOLE_BASE`
+
+原因：
+
+- `NETWEAVER_DASHBOARD_USERNAME` 默认 `admin` 可以正常使用，只是从安全性角度看，后续也可以改。
+- `NETWEAVER_CONSOLE_BASE` 默认 `/console`，对应浏览器访问 `http://<server-ip>:8080/console/`，大多数情况下保持默认最省事。
+
+#### 前端构建相关配置
+
+如果你们让 controller 托管前端控制台，通常还会保持：
+
+- `VITE_API_BASE_URL=` 留空
+- `VITE_APP_BASE=/console/`
+
+这样前端会继续请求同域名下的 `/api/...`，最适合服务器同域部署。
+
+这里再强调一下：
+
+- `VITE_API_BASE_URL` 在“后端和前端由同一个 controller 托管”的方案里，通常留空就是正确配置。
+- `VITE_APP_BASE` 要和 `NETWEAVER_CONSOLE_BASE` 对应上。
+  例如后端挂载路径是 `/console`，前端构建基础路径就写 `/console/`。
+
+### 手动启动
+
+部署脚本跑完后，可以先不装 `systemd`，直接手动启动：
+
+```bash
+bash deploy/server/run/start-controller.sh
+```
+
+### 安装 systemd 服务
+
+如果你们希望服务器开机自启或长期常驻运行，再执行：
+
+```bash
+sudo bash scripts/install_systemd.sh
+sudo systemctl start netweaver-controller.service
+sudo systemctl status netweaver-controller.service
+```
+
+### 访问结果
+
+部署成功后，至少应能访问：
+
+- `http://<server-ip>:8080/ping`
+- `http://<server-ip>:8080/console/`
+
 ## 多机联调最容易填错的地方
 
 1. 前端请求的后端地址，要填 Controller 的 HTTP 地址，例如 `http://192.168.1.23:8080`。

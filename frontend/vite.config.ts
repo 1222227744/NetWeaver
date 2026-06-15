@@ -24,7 +24,13 @@ export default defineConfig(({ mode }) => {
   // 如果后面要接队友机器，只需要把这个地址换成对方局域网 IP。
   const proxyTarget = env.VITE_PROXY_TARGET || 'http://127.0.0.1:8080'
 
+  // 前端构建 base。
+  // 一键部署脚本会把它设成 /console/，让控制台页面可以直接挂到 controller 同域名下。
+  // 本地开发默认仍然使用 /，避免影响 dev / preview。
+  const appBase = env.VITE_APP_BASE || '/'
+
   return {
+    base: appBase,
     // 告诉 Vite：这个项目要支持 .vue 单文件组件。
     // 没有这个插件，Vite 不知道怎么处理 .vue 文件。
     plugins: [vue()],

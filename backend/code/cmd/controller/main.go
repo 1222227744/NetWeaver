@@ -38,6 +38,8 @@ func logControllerStartupWarnings() {
 func main() {
 	addr := flag.String("addr", config.DefaultControllerAddr, "HTTP listen address")
 	relayAddr := flag.String("relay-addr", fmt.Sprintf(":%d", config.DefaultRelayPort), "UDP relay listen address; empty disables relay")
+	consoleDir := flag.String("console-dir", "", "frontend static directory; empty disables controller-hosted console")
+	consoleBase := flag.String("console-base", "/console", "URL base used when serving the frontend console")
 	flag.Parse()
 
 	logControllerStartupWarnings()
@@ -57,7 +59,10 @@ func main() {
 		}()
 	}
 
-	router := api.NewRouter(state.NewRegistry())
+	router := api.NewRouterWithConsole(state.NewRegistry(), strings.TrimSpace(*consoleDir), strings.TrimSpace(*consoleBase))
+	if strings.TrimSpace(*consoleDir) != "" {
+		log.Printf("console static hosting enabled: dir=%s base=%s", strings.TrimSpace(*consoleDir), strings.TrimSpace(*consoleBase))
+	}
 	if err := router.Run(*addr); err != nil {
 		log.Fatal(err)
 	}
