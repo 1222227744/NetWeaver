@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { Connection, Lock, Monitor, Share } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
@@ -11,7 +10,6 @@ import {
   getDashboardNodes,
   getDashboardStats,
   getNodeMetrics,
-  getStoredDashboardAuth,
   hasValidDashboardAuth,
   loginDashboard,
   setDashboardAuth,
@@ -21,6 +19,10 @@ import {
   type DashboardNode,
   type GraphLinkItem
 } from '@/api/dashboard'
+import DashboardControlBar from '@/components/dashboard/DashboardControlBar.vue'
+import DashboardLoginPanel from '@/components/dashboard/DashboardLoginPanel.vue'
+import DashboardOverviewCards from '@/components/dashboard/DashboardOverviewCards.vue'
+import NodeListPanel from '@/components/dashboard/NodeListPanel.vue'
 import NodeRelationGraph from '@/components/dashboard/NodeRelationGraph.vue'
 
 // 这个组件是 Dashboard 页面当前最核心的“业务容器”。
@@ -32,8 +34,6 @@ import NodeRelationGraph from '@/components/dashboard/NodeRelationGraph.vue'
 // 3. 再看 handleGraphLinkHover：用户悬停连线后，才查询 source -> target 的 metrics
 // 4. 最后看 template：把上面这些响应式数据渲染成 Element Plus 页面
 
-const initialAuth = getStoredDashboardAuth()
-
 const loginForm = reactive({
   username: 'admin',
   password: ''
@@ -42,8 +42,7 @@ const loginForm = reactive({
 const authState = reactive({
   isAuthenticated: hasValidDashboardAuth(),
   loading: false,
-  errorMessage: '',
-  tokenExpiresAt: initialAuth?.expires_at ?? 0
+  errorMessage: ''
 })
 
 // allNodes 保存后端返回的全部节点，包含 online 和 offline。
@@ -105,22 +104,6 @@ const hasOnlyOfflineNodes = computed(() => {
   return !state.loading && !state.errorMessage && allNodes.value.length > 0 && onlineNodes.value.length === 0
 })
 
-const getStatusTagType = (status: DashboardNode['status']) => {
-  return status === 'online' ? 'success' : 'info'
-}
-
-const getStatusText = (status: DashboardNode['status']) => {
-  return status === 'online' ? '在线' : '离线'
-}
-
-const formatOptionalText = (value: string | number | null | undefined) => {
-  if (value === null || value === undefined || value === '') {
-    return '未上报'
-  }
-
-  return String(value)
-}
-
 const formatTimestamp = (timestamp?: number) => {
   if (!timestamp) {
     return ''
@@ -152,10 +135,6 @@ const formatUptime = (uptimeSeconds: number) => {
   }
 
   return parts.length > 0 ? parts.join(' ') : `${uptimeSeconds} 秒`
-}
-
-const formatLastSeen = (timestamp?: number) => {
-  return timestamp ? new Date(timestamp * 1000).toLocaleString('zh-CN', { hour12: false }) : '未上报'
 }
 
 const getRequestErrorMessage = (error: unknown) => {
@@ -223,7 +202,6 @@ const handleUnauthorized = (message = '登录已过期，请重新登录。') =>
   clearDashboardAuth()
   clearDashboardData()
   authState.isAuthenticated = false
-  authState.tokenExpiresAt = 0
   authState.errorMessage = message
   state.errorMessage = ''
 }
@@ -317,7 +295,7 @@ const loadLinkMetrics = async (
     }
 
     if (isUnauthorizedError(error)) {
-      handleUnauthorized('登录状态无效或已过期，请重新登录后再查看链路数据。')
+      handleUnauthorized('登录已失效，请重新登录。')
       return
     }
 
@@ -325,7 +303,7 @@ const loadLinkMetrics = async (
     state.metricsErrorMessage = message
 
     if (!options.silent) {
-      ElMessage.error(`链路监控加载失败：${message}`)
+      ElMessage.error(`链路详情加载失败：${message}`)
     }
   } finally {
     if (currentSerial === metricsRequestSerial && !shouldKeepVisibleMetrics) {
@@ -344,7 +322,7 @@ const syncSelectedLinkAfterEdgesRefresh = (latestEdges: DashboardEdge[]) => {
   if (!currentEdge) {
     selectedGraphLink.value = null
     selectedLinkMetrics.value = []
-    state.metricsErrorMessage = '当前选中的链路已经不存在，可能是节点离线或建链状态变化。'
+    state.metricsErrorMessage = '当前链路已不可用。'
     return
   }
 
@@ -391,7 +369,7 @@ const loadDashboard = async (options: { silent?: boolean } = {}) => {
     syncSelectedLinkAfterEdgesRefresh(edgesResult.data.edges)
   } catch (error) {
     if (isUnauthorizedError(error)) {
-      handleUnauthorized('登录状态无效或已过期，请重新登录后继续查看控制台。')
+      handleUnauthorized('登录已失效，请重新登录。')
       return
     }
 
@@ -438,9 +416,8 @@ const handleLogin = async () => {
 
     setDashboardAuth(result.data)
     authState.isAuthenticated = true
-    authState.tokenExpiresAt = result.data.expires_at
     loginForm.password = ''
-    ElMessage.success('登录成功，正在加载控制台数据。')
+    ElMessage.success('登录成功。')
 
     await loadDashboard()
     startPolling()
@@ -458,7 +435,6 @@ const handleLogout = () => {
   clearDashboardAuth()
   clearDashboardData()
   authState.isAuthenticated = false
-  authState.tokenExpiresAt = 0
   authState.errorMessage = '已退出登录。'
   ElMessage.success('已退出控制台。')
 }
@@ -490,7 +466,7 @@ watch(selectedTimeRange, () => {
 
 onMounted(() => {
   if (!authState.isAuthenticated) {
-    authState.errorMessage = '请先登录控制台。'
+    authState.errorMessage = '请先登录。'
     return
   }
 
@@ -505,142 +481,38 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="space-y-6">
-    <section v-if="!authState.isAuthenticated" class="panel-surface mx-auto max-w-xl p-8">
-      <div class="flex items-start gap-4">
-        <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-brand-50 text-brand-700">
-          <el-icon class="text-xl"><Lock /></el-icon>
-        </div>
-        <div>
-          <h2 class="text-2xl font-semibold text-slate-900">登录控制台</h2>
-        </div>
-      </div>
-
-      <form class="mt-8 space-y-5" @submit.prevent="handleLogin">
-        <label class="block">
-          <span class="text-sm font-medium text-slate-700">用户名</span>
-          <el-input v-model="loginForm.username" class="mt-2" placeholder="例如：admin" size="large" />
-        </label>
-
-        <label class="block">
-          <span class="text-sm font-medium text-slate-700">密码</span>
-          <el-input
-            v-model="loginForm.password"
-            class="mt-2"
-            placeholder="请输入控制台密码"
-            show-password
-            size="large"
-            type="password"
-          />
-        </label>
-
-        <el-alert
-          v-if="authState.errorMessage"
-          :title="authState.errorMessage"
-          type="warning"
-          show-icon
-          :closable="false"
-        />
-
-        <el-button :loading="authState.loading" native-type="submit" size="large" type="primary" class="w-full">
-          登录并进入控制台
-        </el-button>
-      </form>
-    </section>
+    <DashboardLoginPanel
+      v-if="!authState.isAuthenticated"
+      :error-message="authState.errorMessage"
+      :loading="authState.loading"
+      :password="loginForm.password"
+      :username="loginForm.username"
+      @submit="handleLogin"
+      @update:password="loginForm.password = $event"
+      @update:username="loginForm.username = $event"
+    />
 
     <template v-else>
-      <section class="grid scroll-mt-28 gap-4 md:grid-cols-2 xl:grid-cols-4" data-admin-section="dashboard">
-        <article class="panel-surface p-5">
-          <div class="flex items-start justify-between gap-4">
-            <div>
-              <p class="panel-heading">总节点数</p>
-              <p class="mt-4 text-3xl font-semibold text-slate-900">{{ state.totalNodes }}</p>
-            </div>
-            <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-700">
-              <el-icon class="text-xl"><Share /></el-icon>
-            </div>
-          </div>
-        </article>
+      <div class="flex justify-end">
+        <el-button text type="danger" @click="handleLogout">退出登录</el-button>
+      </div>
 
-        <article class="panel-surface p-5">
-          <div class="flex items-start justify-between gap-4">
-            <div>
-              <p class="panel-heading">在线节点</p>
-              <p class="mt-4 text-3xl font-semibold text-slate-900">
-                {{ state.onlineNodes }}
-              </p>
-            </div>
-            <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
-              <el-icon class="text-xl"><Monitor /></el-icon>
-            </div>
-          </div>
-        </article>
+      <DashboardOverviewCards
+        :controller-uptime-text="formatUptime(state.controllerUptimeSec)"
+        :online-nodes="state.onlineNodes"
+        :total-edges="state.totalEdges"
+        :total-nodes="state.totalNodes"
+      />
 
-        <article class="panel-surface p-5">
-          <div class="flex items-start justify-between gap-4">
-            <div>
-              <p class="panel-heading">链路数</p>
-              <p class="mt-4 text-3xl font-semibold text-slate-900">{{ state.totalEdges }}</p>
-            </div>
-            <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-50 text-cyan-700">
-              <el-icon class="text-xl"><Connection /></el-icon>
-            </div>
-          </div>
-        </article>
-
-        <article class="panel-surface p-5">
-          <div class="flex items-start justify-between gap-4">
-            <div>
-              <p class="panel-heading">运行时长</p>
-              <p class="mt-4 text-3xl font-semibold text-slate-900">{{ formatUptime(state.controllerUptimeSec) }}</p>
-            </div>
-            <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700">
-              <el-icon class="text-xl"><Share /></el-icon>
-            </div>
-          </div>
-        </article>
-      </section>
-
-      <section class="panel-surface p-4">
-        <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <el-radio-group v-model="selectedTimeRange">
-            <el-radio-button
-              v-for="option in timeRangeOptions"
-              :key="option.value"
-              :label="option.value"
-            >
-              {{ option.label }}
-            </el-radio-button>
-          </el-radio-group>
-
-          <div class="flex flex-wrap items-center gap-3">
-            <el-tag round :type="state.refreshing ? 'warning' : 'info'">
-              {{ state.refreshing ? '刷新中' : state.lastUpdatedAt || '尚未加载' }}
-            </el-tag>
-            <el-button :loading="state.loading || state.refreshing" type="primary" @click="loadDashboard()">
-              刷新
-            </el-button>
-            <el-button @click="handleLogout">退出</el-button>
-          </div>
-        </div>
-
-        <el-alert
-          v-if="state.errorMessage"
-          :title="state.errorMessage"
-          type="error"
-          show-icon
-          :closable="false"
-          class="mt-5"
-        />
-
-        <el-alert
-          v-if="state.metricsErrorMessage"
-          :title="state.metricsErrorMessage"
-          type="warning"
-          show-icon
-          :closable="false"
-          class="mt-5"
-        />
-      </section>
+      <DashboardControlBar
+        v-model:selected-time-range="selectedTimeRange"
+        :error-message="state.errorMessage"
+        :last-updated-text="state.lastUpdatedAt"
+        :loading="state.loading"
+        :metrics-error-message="state.metricsErrorMessage"
+        :time-range-options="timeRangeOptions"
+        @refresh="loadDashboard()"
+      />
 
       <section class="grid gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(26rem,1fr)] xl:items-start">
         <NodeRelationGraph
@@ -652,73 +524,14 @@ onBeforeUnmount(() => {
           @link-hover="handleGraphLinkHover"
         />
 
-        <section class="panel-surface h-full scroll-mt-28 p-6" data-admin-section="nodes">
-          <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h2 class="text-xl font-semibold text-slate-900">节点列表</h2>
-              <p class="mt-2 text-sm text-slate-500">
-                列表默认把在线节点排在前面，便于联调时先看当前还活着的机器，再看离线历史节点。
-              </p>
-            </div>
-
-            <div class="flex flex-wrap items-center gap-3">
-              <el-tag round type="success">在线 {{ onlineNodes.length }} 台</el-tag>
-              <el-tag round type="info">离线 {{ offlineNodes.length }} 台</el-tag>
-              <el-tag round>总计 {{ allNodes.length }} 台</el-tag>
-            </div>
-          </div>
-
-          <el-alert
-            v-if="hasOnlyOfflineNodes"
-            class="mt-6"
-            type="warning"
-            show-icon
-            :closable="false"
-            title="当前没有在线节点。列表保留离线节点，便于核对 status、last_seen 和虚拟 IP。"
-          />
-
-          <el-empty
-            v-if="isNodeListEmptyState"
-            class="mt-6 rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50"
-            description="当前还没有任何节点"
-          />
-
-          <div v-else class="mt-6 overflow-x-auto rounded-[1.5rem]">
-            <el-table
-              v-loading="state.loading"
-              :data="sortedNodes"
-              stripe
-              border
-              class="min-w-[58rem]"
-              max-height="620"
-              empty-text="当前没有节点"
-            >
-              <el-table-column prop="node_id" label="节点 ID" min-width="180" />
-              <el-table-column prop="hostname" label="主机名" min-width="150" />
-              <el-table-column prop="virtual_ip" label="虚拟 IP" min-width="130" />
-              <el-table-column label="公网地址" min-width="170">
-                <template #default="{ row }">
-                  {{ formatOptionalText(row.public_ip) }}:{{ formatOptionalText(row.public_port) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="nat_type" label="NAT 类型" min-width="170" />
-              <el-table-column prop="connected_peers" label="真实邻居数" min-width="110" align="center" />
-              <el-table-column label="最后心跳" min-width="180">
-                <template #default="{ row }">
-                  {{ formatLastSeen(row.last_seen) }}
-                </template>
-              </el-table-column>
-
-              <el-table-column label="状态" min-width="100" align="center">
-                <template #default="{ row }">
-                  <el-tag round :type="getStatusTagType(row.status)">
-                    {{ getStatusText(row.status) }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-            </el-table>
-          </div>
-        </section>
+        <NodeListPanel
+          :empty="isNodeListEmptyState"
+          :has-only-offline-nodes="hasOnlyOfflineNodes"
+          :loading="state.loading"
+          :nodes="sortedNodes"
+          :offline-count="offlineNodes.length"
+          :online-count="onlineNodes.length"
+        />
       </section>
     </template>
   </div>

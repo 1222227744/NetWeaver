@@ -3,39 +3,24 @@ import { ref } from 'vue'
 
 import AdminSidebar from './AdminSidebar.vue'
 import AdminTopbar from './AdminTopbar.vue'
-import type { SidebarMenuGroup } from './layout.types'
 
 // 这个组件是后台页面最外层的“骨架”：
 // 左边是侧边栏，右边是顶部栏和内容区。
 // 具体内容不写死在这里，而是通过 slot 由外部传进来。
 //
 // 推荐把它理解成“后台页面的模板”：
-// - 左边永远是导航
+// - 左边永远是品牌侧栏
 // - 上面永远是标题栏
 // - 中间大块区域才是每个具体业务页面的内容
 const props = defineProps<{
-  activeMenu: string
-  menuGroups: SidebarMenuGroup[]
-  pageDescription: string
+  pageDescription?: string
   pageTitle: string
-}>()
-
-// 当侧边栏菜单变化时，通知父组件更新激活菜单。
-const emit = defineEmits<{
-  (event: 'update:activeMenu', value: string): void
+  sidebarTitle: string
 }>()
 
 // 控制移动端抽屉菜单是否打开。
 // ref(...) 可以理解成“会跟着界面一起更新的变量”。
 const mobileSidebarVisible = ref(false)
-
-// 点击菜单时：
-// 1. 把新菜单值往上抛给父组件
-// 2. 如果当前是移动端抽屉，同时把抽屉关掉
-const handleMenuChange = (menuKey: string) => {
-  emit('update:activeMenu', menuKey)
-  mobileSidebarVisible.value = false
-}
 
 // 只在移动端时需要主动打开侧边栏。
 const openSidebar = () => {
@@ -54,9 +39,7 @@ const openSidebar = () => {
       <!-- 大屏下保持固定侧边导航，后台常用入口不需要折叠到内容流里 -->
       <AdminSidebar
         class="hidden h-[calc(100vh-3rem)] shrink-0 lg:flex"
-        :active-menu="props.activeMenu"
-        :menu-groups="props.menuGroups"
-        @update:active-menu="handleMenuChange"
+        :sidebar-title="props.sidebarTitle"
       />
 
       <!--
@@ -67,9 +50,7 @@ const openSidebar = () => {
         <!-- 移动端沿用同一份侧边栏组件，避免未来维护两套导航结构 -->
         <AdminSidebar
           class="h-full rounded-none"
-          :active-menu="props.activeMenu"
-          :menu-groups="props.menuGroups"
-          @update:active-menu="handleMenuChange"
+          :sidebar-title="props.sidebarTitle"
         />
       </el-drawer>
 
