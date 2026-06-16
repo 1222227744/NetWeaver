@@ -504,13 +504,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="panel-surface h-full scroll-mt-28 p-6" data-admin-section="topology">
+  <section class="panel-surface h-full p-6">
     <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
       <div>
         <h2 class="text-xl font-semibold text-slate-900">节点关系图</h2>
-        <p class="mt-2 text-sm text-slate-500">
-          图中的连线表示当前已经建立成功的真实链路，标签文字直接区分 `P2P` 和 `Relay`。
-        </p>
       </div>
 
       <div class="flex flex-wrap items-center gap-3">

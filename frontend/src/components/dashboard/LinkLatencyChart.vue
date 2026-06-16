@@ -337,9 +337,8 @@ onBeforeUnmount(() => {
             {{ props.node?.hostname }}
           </h3>
           <p v-if="props.link" class="mt-1 text-sm text-slate-500">
-            {{ props.link.source }} -> {{ props.link.target }}
+            {{ props.link.relationText }}
           </p>
-          <p v-else class="mt-1 text-sm text-slate-500">{{ props.node?.node_id }}</p>
         </div>
 
         <el-tag v-if="props.link" round :type="props.link.edgeType === 'p2p' ? 'success' : 'warning'">
@@ -352,46 +351,46 @@ onBeforeUnmount(() => {
 
       <div v-if="props.link && props.sourceNode && props.targetNode" class="mt-4 grid grid-cols-2 gap-3 text-sm text-slate-600">
         <div class="rounded-2xl bg-slate-50 px-3 py-2">
-          <p class="text-xs text-slate-400">源节点虚拟 IP</p>
+          <p class="text-xs text-slate-400">源地址</p>
           <p class="mt-1 text-slate-700">{{ props.sourceNode.virtual_ip }}</p>
         </div>
         <div class="rounded-2xl bg-slate-50 px-3 py-2">
-          <p class="text-xs text-slate-400">目标节点虚拟 IP</p>
+          <p class="text-xs text-slate-400">目标地址</p>
           <p class="mt-1 text-slate-700">{{ props.targetNode.virtual_ip }}</p>
         </div>
         <div class="rounded-2xl bg-slate-50 px-3 py-2">
-          <p class="text-xs text-slate-400">源节点 NAT</p>
+          <p class="text-xs text-slate-400">源端网络</p>
           <p class="mt-1 text-slate-700">{{ props.sourceNode.nat_type }}</p>
         </div>
         <div class="rounded-2xl bg-slate-50 px-3 py-2">
-          <p class="text-xs text-slate-400">目标节点 NAT</p>
+          <p class="text-xs text-slate-400">目标端网络</p>
           <p class="mt-1 text-slate-700">{{ props.targetNode.nat_type }}</p>
         </div>
       </div>
 
       <div v-else-if="props.node" class="mt-4 grid grid-cols-2 gap-3 text-sm text-slate-600">
         <div class="rounded-2xl bg-slate-50 px-3 py-2">
-          <p class="text-xs text-slate-400">虚拟 IP</p>
+          <p class="text-xs text-slate-400">地址</p>
           <p class="mt-1 text-slate-700">{{ props.node.virtual_ip }}</p>
         </div>
         <div class="rounded-2xl bg-slate-50 px-3 py-2">
-          <p class="text-xs text-slate-400">公网地址</p>
+          <p class="text-xs text-slate-400">外部地址</p>
           <p class="mt-1 text-slate-700">{{ formatPublicAddress(props.node) }}</p>
         </div>
         <div class="rounded-2xl bg-slate-50 px-3 py-2">
-          <p class="text-xs text-slate-400">NAT 类型</p>
+          <p class="text-xs text-slate-400">网络类型</p>
           <p class="mt-1 text-slate-700">{{ props.node.nat_type }}</p>
         </div>
         <div class="rounded-2xl bg-slate-50 px-3 py-2">
-          <p class="text-xs text-slate-400">当前状态</p>
+          <p class="text-xs text-slate-400">状态</p>
           <p class="mt-1 text-slate-700">{{ formatStatusText(props.node.status) }}</p>
         </div>
         <div class="rounded-2xl bg-slate-50 px-3 py-2">
-          <p class="text-xs text-slate-400">已连接邻居</p>
+          <p class="text-xs text-slate-400">连接数</p>
           <p class="mt-1 text-slate-700">{{ props.node.connected_peers }}</p>
         </div>
         <div class="rounded-2xl bg-slate-50 px-3 py-2">
-          <p class="text-xs text-slate-400">最后心跳</p>
+          <p class="text-xs text-slate-400">最近活动</p>
           <p class="mt-1 text-slate-700">{{ formatLastSeen(props.node.last_seen) }}</p>
         </div>
       </div>
