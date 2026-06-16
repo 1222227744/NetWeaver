@@ -81,7 +81,7 @@ func registerConsoleStatic(r *gin.Engine, consoleDir string, consoleBase string)
 	assetsDir := filepath.Join(absDir, "assets")
 	if _, err := os.Stat(assetsDir); err == nil {
 		assetsRoute := path.Join(consoleBase, "assets")
-		r.StaticFS(assetsRoute, os.DirFS(assetsDir))
+		r.StaticFS(assetsRoute, http.Dir(assetsDir))
 	}
 
 	serveIndex := func(c *gin.Context) {
@@ -93,7 +93,7 @@ func registerConsoleStatic(r *gin.Engine, consoleDir string, consoleBase string)
 	r.GET(path.Join(consoleBase, "index.html"), serveIndex)
 
 	if consoleFiles, err := fs.Sub(os.DirFS(absDir), "."); err == nil {
-		r.StaticFS(consoleBase, consoleFiles)
+		r.StaticFS(consoleBase, http.FS(consoleFiles))
 	}
 }
 
