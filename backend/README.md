@@ -1,17 +1,17 @@
 # NetWeaver Backend
 
-这份说明只描述当前 `backend/code` 目录下真实存在、并且已经和仓库现状对齐的后端启动方式。
+这份说明只描述当前 `backend` 目录下真实存在、并且已经和仓库现状对齐的后端启动方式。
 
 ## 目录定位
 
-- Go 模块根目录是 `backend/code`
-- Controller 启动入口是 `backend/code/cmd/controller`
-- Node 启动入口是 `backend/code/cmd/node`
+- Go 模块根目录是 `backend`
+- Controller 启动入口是 `backend/cmd/controller`
+- Node 启动入口是 `backend/cmd/node`
 
 也就是说，后端相关命令推荐先进入：
 
 ```bash
-cd backend/code
+cd backend
 ```
 
 后面的 `go run ./cmd/...`、`go test ./...` 都以这个目录为基准。
@@ -48,7 +48,7 @@ export NETWEAVER_STUN_SERVERS='stun.l.google.com:19302,stun1.l.google.com:19302,
 进入后端目录：
 
 ```bash
-cd backend/code
+cd backend
 ```
 
 启动 Controller：
@@ -116,7 +116,7 @@ Node 真正接 Controller 联调时，请使用 `run` 子命令。
 基本写法：
 
 ```bash
-cd backend/code
+cd backend
 go run ./cmd/node run -controller http://127.0.0.1:8080
 ```
 
@@ -204,20 +204,20 @@ go run ./cmd/node run \
 终端 1：
 
 ```bash
-cd backend/code
+cd backend
 go run ./cmd/node p2p -profile A
 ```
 
 终端 2：
 
 ```bash
-cd backend/code
+cd backend
 go run ./cmd/node p2p -profile B
 ```
 
 ## 编译检查
 
-在 `backend/code` 目录下执行：
+在 `backend` 目录下执行：
 
 ```bash
 go test ./...
@@ -239,7 +239,7 @@ bash scripts/deploy_server.sh
 这个脚本会做这些事：
 
 - 检查服务器上是否有 `go` 和 `npm`
-- 在 `backend/code` 下执行 `go test ./...`
+- 在 `backend` 下执行 `go test ./...`
 - 编译 `controller` 可执行文件
 - 在 `frontend` 下执行 `npm ci` 和生产构建
 - 生成服务器部署目录 `deploy/server/`
