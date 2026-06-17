@@ -31,7 +31,7 @@ feature/fronted-1222227744-落地微调与控制台优化
 
 - 后端补充启动警告：当仍在使用默认 Dashboard 账号、默认 JWT、默认 Node PSK、默认 Relay 公网地址、默认 STUN 列表时，启动日志会显式提醒
 - 后端新增 `NETWEAVER_STUN_SERVERS` 环境变量入口，便于按环境切换 STUN 方案
-- 后端 README 已重写到当前代码结构，明确 `backend/code` 才是 Go 模块根目录，并补全 Controller / Node / TUN / Relay 的真实启动方式
+- 后端 README 已重写到当前代码结构，明确 `backend` 才是 Go 模块根目录，并补全 Controller / Node / TUN / Relay 的真实启动方式
 - 前端侧边栏不再伪装成多页面导航，而是切换成真正可用的页内导航
 - 前端关系图移除带方向误导的箭头，改为更贴合“真实已建链路”的展示方式
 - 前端关系图高度不再固定为很小的盒子，而是会随着节点数量扩展
@@ -74,7 +74,7 @@ feature/fronted-1222227744-前端收尾迭代-v1.8接口落地
 
 - 本次已经逐个阅读全部源码、配置和 Markdown / TeX 说明文件。
 - `frontend/node_modules/` 不属于项目源码，因此不纳入正文分析。
-- `frontend/package-lock.json`、`backend/code/go.sum` 属于依赖锁定文件，已计入文件清单，但不逐行展开业务解释。
+- `frontend/package-lock.json`、`backend/go.sum` 属于依赖锁定文件，已计入文件清单，但不逐行展开业务解释。
 - `docs/Week1_Report.pdf` 属于编译后的二进制文档产物，功能说明以 `docs/Week1_Report.tex` 为准。
 
 ## 一句话结论
@@ -115,7 +115,7 @@ NetWeaver/
 需要特别说明的结构事实：
 
 - `docs/协作规约.md` 中提到的 `resources/`、`scripts/`、`config.json`、根目录 `.env` 目前并没有形成稳定的实际仓库结构。
-- `backend/code/README.md` 中提到“根目录已配置 `go.work`”，但本次扫描没有在仓库中看到该文件。
+- 当前仓库没有 `go.work`，后端命令继续保持先进入 `backend` 目录再执行。
 - `frontend/README.md` 中有部分历史记录引用了已经不在当前仓库中的旧文档名，这些内容属于历史记录，不应再被当作当前真相。
 
 ## 文件清单
@@ -146,25 +146,25 @@ NetWeaver/
 - PM 方向已经开始沉淀背景、意义、竞品痛点和 NAT 穿透流程。
 - 论文材料处于“有骨架、有片段内容，但远未成稿”的阶段。
 
-### 3. backend/code 目录
+### 3. backend 目录
 
 | 文件 | 作用 | 当前状态 |
 | --- | --- | --- |
-| `backend/code/go.mod` | Go 模块定义 | 已配置 Gin 与 water 等依赖 |
-| `backend/code/go.sum` | Go 依赖锁定文件 | 锁文件，正常存在 |
-| `backend/code/README.md` | 后端使用说明 | 有价值，但包含部分过时或环境依赖表述 |
-| `backend/code/cmd/controller/main.go` | Controller 启动入口 | 已能读取监听地址并启动 Gin 服务 |
-| `backend/code/cmd/node/main.go` | Node 程序总入口 | 已支持 `tun`、`run`、`p2p` 三种模式 |
-| `backend/code/internal/controller/api/router.go` | Controller 路由与 handler | 已实现多条接口，但仍有文档不一致问题 |
-| `backend/code/internal/controller/middleware/cors.go` | CORS 中间件 | 已实现基础跨域放行 |
-| `backend/code/internal/controller/state/registry.go` | Controller 内存状态中心 | 已管理节点、心跳、统计、边与 metrics，但语义仍较粗糙 |
-| `backend/code/internal/node/client/client.go` | Node 访问 Controller 的 HTTP 客户端 | 已封装 register / heartbeat / peers / metrics |
-| `backend/code/internal/node/runtime/agent.go` | Node 运行时主逻辑 | 已实现注册、周期心跳、周期拉 peers |
-| `backend/code/internal/node/p2p/peer.go` | 纯 UDP 双节点互发实验 | 已能互发字符串，不接 Controller |
-| `backend/code/internal/node/tun/tun.go` | TUN 创建、抓包、自动回 ICMP Echo | 功能较完整，但仍是独立实验模块 |
-| `backend/code/pkg/config/config.go` | 后端默认配置常量 | 已集中管理默认地址与超时等 |
-| `backend/code/pkg/logger/logger.go` | 简单日志构造器 | 功能简单，可用但当前使用较少 |
-| `backend/code/pkg/protocol/protocol.go` | 前后端 / 节点与 Controller 的协议结构定义 | 已集中定义 DTO，但部分字段设计与文档不一致 |
+| `backend/go.mod` | Go 模块定义 | 已配置 Gin 与 water 等依赖 |
+| `backend/go.sum` | Go 依赖锁定文件 | 锁文件，正常存在 |
+| `backend/README.md` | 后端使用说明 | 有价值，但包含部分过时或环境依赖表述 |
+| `backend/cmd/controller/main.go` | Controller 启动入口 | 已能读取监听地址并启动 Gin 服务 |
+| `backend/cmd/node/main.go` | Node 程序总入口 | 已支持 `tun`、`run`、`p2p` 三种模式 |
+| `backend/internal/controller/api/router.go` | Controller 路由与 handler | 已实现多条接口，但仍有文档不一致问题 |
+| `backend/internal/controller/middleware/cors.go` | CORS 中间件 | 已实现基础跨域放行 |
+| `backend/internal/controller/state/registry.go` | Controller 内存状态中心 | 已管理节点、心跳、统计、边与 metrics，但语义仍较粗糙 |
+| `backend/internal/node/client/client.go` | Node 访问 Controller 的 HTTP 客户端 | 已封装 register / heartbeat / peers / metrics |
+| `backend/internal/node/runtime/agent.go` | Node 运行时主逻辑 | 已实现注册、周期心跳、周期拉 peers |
+| `backend/internal/node/p2p/peer.go` | 纯 UDP 双节点互发实验 | 已能互发字符串，不接 Controller |
+| `backend/internal/node/tun/tun.go` | TUN 创建、抓包、自动回 ICMP Echo | 功能较完整，但仍是独立实验模块 |
+| `backend/pkg/config/config.go` | 后端默认配置常量 | 已集中管理默认地址与超时等 |
+| `backend/pkg/logger/logger.go` | 简单日志构造器 | 功能简单，可用但当前使用较少 |
+| `backend/pkg/protocol/protocol.go` | 前后端 / 节点与 Controller 的协议结构定义 | 已集中定义 DTO，但部分字段设计与文档不一致 |
 
 后端侧当前结论：
 
@@ -233,8 +233,8 @@ NetWeaver/
 
 ### 后端已经落地的事实
 
-1. Controller 可以通过 `backend/code/cmd/controller/main.go` 启动。
-2. Node 程序可以通过 `backend/code/cmd/node/main.go` 进入三种模式：
+1. Controller 可以通过 `backend/cmd/controller/main.go` 启动。
+2. Node 程序可以通过 `backend/cmd/node/main.go` 进入三种模式：
    - `tun`
    - `run`
    - `p2p`
@@ -443,26 +443,26 @@ npm run build
 Controller：
 
 ```powershell
-go run ./backend/code/cmd/controller
+go run ./backend/cmd/controller
 ```
 
 Node runtime：
 
 ```powershell
-go run ./backend/code/cmd/node run -controller http://127.0.0.1:8080
+go run ./backend/cmd/node run -controller http://127.0.0.1:8080
 ```
 
 P2P 实验：
 
 ```powershell
-go run ./backend/code/cmd/node p2p -profile A
-go run ./backend/code/cmd/node p2p -profile B
+go run ./backend/cmd/node p2p -profile A
+go run ./backend/cmd/node p2p -profile B
 ```
 
 TUN 实验：
 
 ```powershell
-go run ./backend/code/cmd/node tun
+go run ./backend/cmd/node tun
 ```
 
 ### 本次环境下的实际验证结果
@@ -512,15 +512,15 @@ Could not create directory for output chunks: ...\frontend\dist\assets
 - `frontend/README.md` 更适合作为“前端开发历史记录”
 - 不应再把其中所有历史引用当作当前仓库现状
 
-### 3. `backend/code/README.md` 有环境假设偏旧
+### 3. `backend/README.md` 仍需继续跟随当前目录结构维护
 
-当前后端 README 存在这些偏差：
+当前后端 README 现在主要需要继续关注这些点：
 
-- 使用了具体 Linux 个人目录路径示例
-- 声称根目录已配置 `go.work`
-- 没有同步反映当前 Windows / WSL 混合开发背景
+- 要持续和当前 `backend` 目录结构保持一致
+- 要继续按当前 Windows / WSL 混合开发背景维护命令示例
+- 多机联调和部署步骤后续仍可能随着项目收尾继续补充
 
-它仍然有使用价值，但需要后续补一次以当前团队环境为准的修订。
+它仍然有使用价值，但需要后续继续跟着项目现状维护。
 
 ### 4. `docs/协作规约.md` 里的目录规划不完全等于现状
 
@@ -681,12 +681,12 @@ Could not create directory for output chunks: ...\frontend\dist\assets
 4. `frontend/README.md`
 5. `frontend/src/api/dashboard.ts`
 6. `frontend/src/components/dashboard/OnlineNodeTable.vue`
-7. `backend/code/pkg/protocol/protocol.go`
-8. `backend/code/internal/controller/api/router.go`
-9. `backend/code/internal/controller/state/registry.go`
-10. `backend/code/internal/node/runtime/agent.go`
-11. `backend/code/internal/node/p2p/peer.go`
-12. `backend/code/internal/node/tun/tun.go`
+7. `backend/pkg/protocol/protocol.go`
+8. `backend/internal/controller/api/router.go`
+9. `backend/internal/controller/state/registry.go`
+10. `backend/internal/node/runtime/agent.go`
+11. `backend/internal/node/p2p/peer.go`
+12. `backend/internal/node/tun/tun.go`
 
 ## 本次扫描后的结论
 

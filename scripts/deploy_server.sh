@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_DIR="${ROOT_DIR}/deploy/server"
-BACKEND_DIR="${ROOT_DIR}/backend/code"
+BACKEND_DIR="${ROOT_DIR}/backend"
 FRONTEND_DIR="${ROOT_DIR}/frontend"
 ENV_FILE="${DEPLOY_DIR}/netweaver-server.env"
 CONTROLLER_BASE="${DEPLOY_DIR}/controller"
